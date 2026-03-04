@@ -256,6 +256,10 @@ BioClaw builds upon the STELLA framework. If you use BioClaw in your research, p
 - [NanoClaw](https://github.com/qwibitai/nanoclaw) — Lightweight container-based agent architecture
 - [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-sdk) — Anthropic's SDK for building AI agents
 
+## Acknowledgments
+
+This project was developed in the **Le Cong Lab** at Stanford University and the **Mengdi Wang Lab** at Princeton University.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
