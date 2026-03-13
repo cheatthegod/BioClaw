@@ -26,6 +26,7 @@ export interface WeComChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  autoRegister?: (jid: string, name: string, channelName: string) => void;
 }
 
 /**
@@ -144,7 +145,15 @@ export class WeComChannel implements Channel {
 
     this.opts.onChatMetadata(chatJid, timestamp);
 
-    const groups = this.opts.registeredGroups();
+    let groups = this.opts.registeredGroups();
+    if (!groups[chatJid] && this.opts.autoRegister) {
+      const chatName = body.chattype === 'group'
+        ? `WeCom Group ${body.chatid || chatJid}`
+        : `WeCom DM ${body.from.userid}`;
+      this.opts.autoRegister(chatJid, chatName, 'wecom');
+      groups = this.opts.registeredGroups();
+    }
+
     if (groups[chatJid]) {
       this.opts.onMessage(chatJid, {
         id: body.msgid,

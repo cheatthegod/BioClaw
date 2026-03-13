@@ -13,6 +13,7 @@ import {
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { WeComChannel } from './channels/wecom.js';
+import { DiscordChannel } from './channels/discord.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -475,6 +476,17 @@ async function main(): Promise<void> {
     onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
     onChatMetadata: (chatJid: string, timestamp: string) => storeChatMetadata(chatJid, timestamp),
     registeredGroups: () => registeredGroups,
+    autoRegister: (jid: string, name: string, channelName: string) => {
+      if (registeredGroups[jid]) return;
+      const folder = `${channelName}-${jid.split('@')[0].slice(-8)}`;
+      registerGroup(jid, {
+        name,
+        folder,
+        trigger: TRIGGER_PATTERN.source,
+        added_at: new Date().toISOString(),
+        requiresTrigger: false,
+      });
+    },
   };
 
   // WeCom channel (connect first — WhatsApp's heavy sync can starve the event loop)
@@ -503,6 +515,20 @@ async function main(): Promise<void> {
     await whatsapp.connect();
   } else {
     logger.info('WhatsApp disabled via DISABLE_WHATSAPP env var');
+  }
+
+  // Discord channel (optional — only if token is configured)
+  const discordToken = process.env.DISCORD_BOT_TOKEN;
+  if (discordToken) {
+    const discord = new DiscordChannel({ token: discordToken, ...channelCallbacks });
+    channels.push(discord);
+    try {
+      await discord.connect();
+    } catch (err) {
+      logger.error({ err }, 'Discord connection failed, continuing without it');
+    }
+  } else {
+    logger.info('Discord not configured (set DISCORD_BOT_TOKEN to enable)');
   }
 
   // Start subsystems
