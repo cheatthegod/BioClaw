@@ -66,7 +66,9 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     anndata \
     pysam \
     requests \
-    multiqc
+    multiqc \
+    cnsplots \
+    pyGenomeTracks
 
 # Install PyMOL (headless) via apt
 RUN apt-get update && apt-get install -y \

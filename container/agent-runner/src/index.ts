@@ -268,6 +268,7 @@ function getBioSystemPrompt(): string {
     '- /home/node/.claude/skills/bio-tools/volcano_plot_template.py',
     '- /home/node/.claude/skills/bio-tools/qc_summary_plot_template.py',
     '- /home/node/.claude/skills/bio-tools/pymol_render_template.py',
+    'For publication-ready figures (Cell/Nature/Science style): use cnsplots (volcano, box, heatmap, etc.). For genome browser tracks: use pyGenomeTracks with make_tracks_file + pyGenomeTracks.',
     'Before sending an image, quickly sanity-check that labels are legible, colors are not confusing, and the figure communicates one clear message.',
     'Keep messages concise and action-oriented, and mention important output file paths when relevant.',
     '',
@@ -296,8 +297,29 @@ function getSessionSummary(sessionId: string, transcriptPath: string): string | 
   return null;
 }
 
+/** Extract output file paths from transcript (for _latest.md snapshot before compaction). */
+function extractOutputPathsFromTranscript(content: string): string[] {
+  const re = /\/workspace\/group\/[^\s)"'\]<>]+\.(csv|tsv|png|jpg|jpeg|bam|sam|h5ad|pdf|txt)/gi;
+  const seen = new Set<string>();
+  const order: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const p = m[0];
+    if (!seen.has(p)) {
+      seen.add(p);
+      order.push(p);
+    } else {
+      order.splice(order.indexOf(p), 1);
+      order.push(p); // move to end (most recent)
+    }
+  }
+  return order;
+}
+
 /**
  * Archive the full transcript to conversations/ before compaction.
+ * Also writes _latest.md with output paths extracted from the transcript — helps
+ * preserve "latest analysis state" when context is compacted.
  */
 function createPreCompactHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -333,6 +355,24 @@ function createPreCompactHook(): HookCallback {
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
+
+      // Snapshot output paths for _latest.md — helps avoid analyzing old data after compaction
+      const outputPaths = extractOutputPathsFromTranscript(content);
+      if (outputPaths.length > 0 && fs.existsSync('/workspace/group')) {
+        const now = new Date().toISOString();
+        const latestContent = [
+          '# Latest outputs (auto-updated before compaction)',
+          '',
+          `Updated: ${now}`,
+          '',
+          '## Output files',
+          '',
+          ...outputPaths.map((p) => `- ${p}`),
+          '',
+        ].join('\n');
+        fs.writeFileSync('/workspace/group/_latest.md', latestContent);
+        log(`Updated _latest.md with ${outputPaths.length} output paths`);
+      }
     } catch (err) {
       log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
     }
