@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -11,6 +12,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { WeComChannel } from './channels/wecom.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -36,7 +38,7 @@ import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { NewMessage, RegisteredGroup } from './types.js';
+import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -49,7 +51,32 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
+let wecom: WeComChannel | null = null;
+const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+function channelForJid(jid: string): Channel | undefined {
+  return channels.find(ch => ch.ownsJid(jid));
+}
+
+async function sendToChannel(jid: string, text: string): Promise<void> {
+  const ch = channelForJid(jid);
+  if (!ch) {
+    logger.warn({ jid }, 'No channel owns this JID, cannot send');
+    return;
+  }
+  const formatted = ch.prefixAssistantName ? `${ASSISTANT_NAME}: ${text}` : text;
+  await ch.sendMessage(jid, formatted);
+}
+
+async function sendImageToChannel(jid: string, imagePath: string, caption?: string): Promise<void> {
+  const ch = channelForJid(jid);
+  if (!ch?.sendImage) {
+    logger.warn({ jid }, 'No channel with image support for this JID');
+    return;
+  }
+  await ch.sendImage(jid, imagePath, caption);
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -165,22 +192,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await whatsapp.setTyping(chatJid, true);
+  const ch = channelForJid(chatJid);
+  if (ch?.setTyping) await ch.setTyping(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
+        await sendToChannel(chatJid, text);
         outputSentToUser = true;
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
     }
 
@@ -189,7 +214,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await whatsapp.setTyping(chatJid, false);
+  if (ch?.setTyping) await ch.setTyping(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -439,39 +464,67 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
-    await whatsapp.disconnect();
+    for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Create WhatsApp channel
-  whatsapp = new WhatsAppChannel({
-    onMessage: (chatJid, msg) => storeMessage(msg),
-    onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
+  // Create and connect channels
+  const channelCallbacks = {
+    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onChatMetadata: (chatJid: string, timestamp: string) => storeChatMetadata(chatJid, timestamp),
     registeredGroups: () => registeredGroups,
-  });
+  };
 
-  // Connect — resolves when first connected
-  await whatsapp.connect();
+  // WeCom channel (connect first — WhatsApp's heavy sync can starve the event loop)
+  const wecomBotId = process.env.WECOM_BOT_ID;
+  const wecomSecret = process.env.WECOM_SECRET;
+  if (wecomBotId && wecomSecret) {
+    const agentCreds = process.env.WECOM_CORP_ID && process.env.WECOM_CORP_SECRET && process.env.WECOM_AGENT_ID
+      ? { corpId: process.env.WECOM_CORP_ID, corpSecret: process.env.WECOM_CORP_SECRET, agentId: process.env.WECOM_AGENT_ID }
+      : undefined;
+    wecom = new WeComChannel({ botId: wecomBotId, secret: wecomSecret, agent: agentCreds, ...channelCallbacks });
+    channels.push(wecom);
+    try {
+      await wecom.connect();
+    } catch (err) {
+      logger.error({ err }, 'WeCom connection failed, continuing without it');
+      wecom = null;
+    }
+  } else {
+    logger.info('WeCom not configured (set WECOM_BOT_ID and WECOM_SECRET to enable)');
+  }
 
-  // Start subsystems (independently of connection handler)
+  // WhatsApp channel (skip if DISABLE_WHATSAPP is set)
+  if (!process.env.DISABLE_WHATSAPP) {
+    whatsapp = new WhatsAppChannel(channelCallbacks);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  } else {
+    logger.info('WhatsApp disabled via DISABLE_WHATSAPP env var');
+  }
+
+  // Start subsystems
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
-      const text = formatOutbound(whatsapp, rawText);
-      if (text) await whatsapp.sendMessage(jid, text);
+      const ch = channelForJid(jid);
+      if (ch) {
+        const text = formatOutbound(ch, rawText);
+        if (text) await ch.sendMessage(jid, text);
+      }
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => whatsapp.sendMessage(jid, text),
-    sendImage: (jid, imagePath, caption) => whatsapp.sendImage(jid, imagePath, caption),
+    sendMessage: (jid, text) => sendToChannel(jid, text),
+    sendImage: (jid, imagePath, caption) => sendImageToChannel(jid, imagePath, caption),
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp.syncGroupMetadata(force),
+    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
