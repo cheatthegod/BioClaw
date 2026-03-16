@@ -66,7 +66,10 @@ const IPC_TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const IPC_FILES_DIR = path.join(IPC_DIR, 'files');
 const BASH_TIMEOUT_MS = 5 * 60 * 1000;
 const BASH_MAX_OUTPUT_CHARS = 12000;
-const OPENAI_TOOL_MAX_ITERATIONS = 24;
+const OPENAI_TOOL_MAX_ITERATIONS = Math.max(
+  1,
+  parseInt(process.env.OPENAI_TOOL_MAX_ITERATIONS || '48', 10) || 48,
+);
 const execAsync = promisify(execChildProcess);
 
 type ProviderKind = 'anthropic' | 'openai-compatible';
