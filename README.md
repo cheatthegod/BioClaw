@@ -159,7 +159,7 @@ In any connected chat, simply message:
 
 ## Messaging channels
 
-Supported platforms include **WhatsApp** (default), **Feishu (Lark)**, **WeCom**, **Discord**, **Slack** (Socket Mode), and optional **local web** (browser) chat. Full setup steps, env vars, and disabling channels are in **[docs/CHANNELS.md](docs/CHANNELS.md)** (简体中文：[docs/CHANNELS.zh-CN.md](docs/CHANNELS.zh-CN.md)).
+Supported platforms include **WhatsApp** (default), **Feishu (Lark)**, **WeCom**, **Discord**, **Slack** (Socket Mode), **WeChat Personal** (experimental), and optional **local web** (browser) chat. Full setup steps, env vars, and disabling channels are in **[docs/CHANNELS.md](docs/CHANNELS.md)** (简体中文：[docs/CHANNELS.zh-CN.md](docs/CHANNELS.zh-CN.md)).
 
 **Lab trace** (SSE timeline, workspace tree) is built into the local web UI — no extra config needed. See **[docs/DASHBOARD.md](docs/DASHBOARD.md)**.
 
@@ -341,15 +341,19 @@ All utility scripts are in the `scripts/` directory:
 ```
 BioClaw/
 ├── src/                       # Node orchestrator
-├── container/                 # Agent image + runner
+│   └── channels/              # WhatsApp, WeCom, Feishu, Discord, Slack, WeChat, local web
+├── container/                 # Agent Dockerfile + skills
 ├── scripts/                   # Utility scripts (setup, web, testing)
 ├── groups/                    # Per-group workspace & CLAUDE.md
 ├── docs/
 │   ├── CHANNELS.md            # Messaging platform setup (EN)
 │   ├── CHANNELS.zh-CN.md      # Messaging platform setup (ZH)
+│   ├── DASHBOARD.md           # Lab trace & observability
+│   ├── SECURITY.md            # Trust model & container isolation
+│   ├── SPEC.md                # Technical specification
+│   ├── DEBUG_CHECKLIST.md     # Troubleshooting guide
 │   └── images/                # Doc screenshots
 ├── ExampleTask/               # Demo prompts + screenshots
-├── bioclaw_logo.jpg           # Project logo
 └── README.md
 ```
 

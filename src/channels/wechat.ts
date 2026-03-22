@@ -1,11 +1,9 @@
 /**
  * WeChat Personal Account Channel
  *
- * Uses weixin-agent-sdk (https://github.com/wong2/weixin-agent-sdk) to bridge
- * WeChat personal messages to the BioClaw agent. QR-code login, long-polling.
- *
- * Note: This uses an unofficial API and is for learning/testing only.
- * Risk of account restrictions exists.
+ * Uses weixin-agent-sdk (https://github.com/wong2/weixin-agent-sdk), a community
+ * wrapper around Tencent's OpenClaw WeChat channel (@tencent-weixin/openclaw-weixin).
+ * QR-code login, long-polling for messages.
  */
 import fs from 'fs';
 import os from 'os';

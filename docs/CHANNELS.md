@@ -153,6 +153,32 @@ Optional: `LOCAL_WEB_SECRET` to require a shared secret on the webhook.
 
 ---
 
+## WeChat Personal Account
+
+1. Add to `.env`:
+
+   ```bash
+   ENABLE_WECHAT=true
+   ```
+
+2. Run BioClaw in a **foreground terminal** (the QR code must be visible):
+
+   ```bash
+   npm start
+   ```
+
+3. Scan the QR code with your WeChat app to log in. Auth state is **not** persisted — you will need to scan again on each restart.
+
+4. Send a message in any WeChat conversation. BioClaw auto-registers the conversation and can reply with text and images.
+
+**Limitations:**
+- No proactive messages — the SDK can only respond to inbound messages (request-response pattern).
+- Multiple outputs (text + image) are buffered and sent as a single reply.
+- Voice messages, file sharing, and group @ mentions are not supported.
+- Based on Tencent's OpenClaw WeChat channel (`@tencent-weixin/openclaw-weixin`), community-wrapped by [weixin-agent-sdk](https://github.com/wong2/weixin-agent-sdk). Not officially supported — API may change without notice.
+
+---
+
 ## Disabling channels
 
 - **WhatsApp only off:** `DISABLE_WHATSAPP=1` or `ENABLE_WHATSAPP=false` (other channels can still run if configured).
