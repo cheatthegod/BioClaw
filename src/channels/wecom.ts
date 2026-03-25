@@ -46,7 +46,7 @@ export class WeComChannel implements Channel {
   private client!: WSClient;
   private connected = false;
   private opts: WeComChannelOpts;
-  private pendingReplies = new Map<string, PendingReply>();
+  private pendingReplies = new Map<string, PendingReply[]>();
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private agentToken = '';
@@ -141,7 +141,9 @@ export class WeComChannel implements Channel {
       'WeCom message received',
     );
 
-    this.pendingReplies.set(chatJid, { frame, timestamp: Date.now() });
+    const q = this.pendingReplies.get(chatJid) ?? [];
+    q.push({ frame, timestamp: Date.now() });
+    this.pendingReplies.set(chatJid, q);
 
     this.opts.onChatMetadata(chatJid, timestamp);
 
@@ -178,13 +180,14 @@ export class WeComChannel implements Channel {
    * all future message pushes from the server.
    */
   private async ackAndFreeSlot(chatJid: string): Promise<void> {
-    const pending = this.pendingReplies.get(chatJid);
+    const q = this.pendingReplies.get(chatJid);
+    const pending = q?.shift();
     if (!pending) return;
     try {
       const streamId = crypto.randomUUID();
       await this.client.replyStream(pending.frame, streamId, ' ', true);
     } finally {
-      this.pendingReplies.delete(chatJid);
+      if (!q || q.length === 0) this.pendingReplies.delete(chatJid);
     }
   }
 
@@ -196,11 +199,12 @@ export class WeComChannel implements Channel {
     }
 
     try {
-      const pending = this.pendingReplies.get(jid);
+      const q = this.pendingReplies.get(jid);
+      const pending = q?.shift();
       if (pending) {
         const streamId = crypto.randomUUID();
         await this.client.replyStream(pending.frame, streamId, text, true);
-        this.pendingReplies.delete(jid);
+        if (!q || q.length === 0) this.pendingReplies.delete(jid);
       } else {
         const chatid = this.toWeComId(jid);
         await this.client.sendMessage(chatid, {
@@ -350,10 +354,10 @@ export class WeComChannel implements Channel {
   private cleanStalePendingReplies(): void {
     const now = Date.now();
     const maxAge = 20 * 60 * 1000; // 20 minutes
-    for (const [jid, pending] of this.pendingReplies) {
-      if (now - pending.timestamp > maxAge) {
-        this.pendingReplies.delete(jid);
-      }
+    for (const [jid, q] of this.pendingReplies) {
+      const fresh = q.filter(p => now - p.timestamp <= maxAge);
+      if (fresh.length === 0) this.pendingReplies.delete(jid);
+      else if (fresh.length !== q.length) this.pendingReplies.set(jid, fresh);
     }
   }
 
