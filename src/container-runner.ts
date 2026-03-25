@@ -45,6 +45,100 @@ export interface ContainerOutput {
   error?: string;
 }
 
+function truncateForUser(text: string, maxChars = 240): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function withSuggestions(summary: string, suggestions: string[]): string {
+  return [
+    summary,
+    '',
+    'Suggested next steps:',
+    ...suggestions.map((item, index) => `${index + 1}. ${item}`),
+  ].join('\n');
+}
+
+function classifyRuntimeError(stderr: string, stdout: string): string | null {
+  const combined = `${stderr}\n${stdout}`;
+
+  const moduleNotFound =
+    combined.match(/ModuleNotFoundError:\s+No module named ['"]([^'"]+)['"]/) ||
+    combined.match(/ImportError:\s+No module named\s+([A-Za-z0-9._-]+)/);
+  if (moduleNotFound) {
+    const pkg = moduleNotFound[1];
+    return withSuggestions(
+      `Missing Python dependency: ${pkg}. This skill likely requires an extra Python package that is not installed in the container image yet.`,
+      [
+        `If this is a one-off local test, try installing ${pkg} in a supported writable Python environment and rerun the skill.`,
+        `If this skill should be stable for everyone, add ${pkg} to the container image / dependency setup instead of relying on runtime installation.`,
+        'If you want, inspect the skill code to confirm which import triggered the failure before changing the image.',
+      ],
+    );
+  }
+
+  const commandNotFound =
+    combined.match(/(?:^|\n)([A-Za-z0-9._+-]+): command not found(?:\n|$)/) ||
+    combined.match(/FileNotFoundError: \[Errno 2\] No such file or directory: ['"]([^'"]+)['"]/) ||
+    combined.match(/\/bin\/sh: 1: ([A-Za-z0-9._+-]+): not found/);
+  if (commandNotFound) {
+    const tool = commandNotFound[1];
+    return withSuggestions(
+      `Missing system tool: ${tool}. This skill is trying to call a command that is not available in the current container.`,
+      [
+        `Add ${tool} to the Docker image / container build so it is available on PATH.`,
+        'Do not rely on ad-hoc runtime installation for production use of system tools unless the environment is explicitly designed for it.',
+        'If this command is optional, consider adding a fallback path inside the skill so users still get a partial answer.',
+      ],
+    );
+  }
+
+  if (/permission denied|operation not permitted|EACCES/i.test(combined)) {
+    return withSuggestions(
+      'Permission error while running this skill. The container likely does not have permission to install packages or modify protected system paths at runtime.',
+      [
+        'Do not try to fix this by repeatedly installing packages interactively inside the running container.',
+        'If this dependency is required, add it during image build instead of runtime.',
+        'If you expected runtime installation to work, check whether the command is writing to a protected system path or requires elevated privileges.',
+      ],
+    );
+  }
+
+  if (/No module named pip|pip: command not found/i.test(combined)) {
+    return withSuggestions(
+      'Package installation failed because pip is unavailable in the runtime environment.',
+      [
+        'Treat this as an environment/image issue rather than a transient skill failure.',
+        'Install pip (or the needed package set) during image build if runtime package installation is part of your workflow.',
+        'If runtime installs are not intended, update the skill instructions so the dependency requirement is explicit.',
+      ],
+    );
+  }
+
+  if (/Temporary failure in name resolution|Could not resolve host|Failed to establish a new connection|Connection timed out|Read timed out|Name or service not known/i.test(combined)) {
+    return withSuggestions(
+      'Network or external API access failed while running this skill.',
+      [
+        'Check container network access, proxy configuration, and DNS resolution.',
+        'If the skill depends on an external API or package registry, verify that service is reachable from inside the container.',
+        'If this environment is intentionally offline, the skill may need an offline fallback or pre-bundled resources.',
+      ],
+    );
+  }
+
+  return null;
+}
+
+function formatUserFacingContainerError(code: number | null, stderr: string, stdout: string): string {
+  const classified = classifyRuntimeError(stderr, stdout);
+  if (classified) return classified;
+
+  const rawTail = truncateForUser(stderr || stdout || 'Unknown container error');
+  const codeLabel = code == null ? 'unknown' : String(code);
+  return `Container exited with code ${codeLabel}. Last error output: ${rawTail}`;
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -327,7 +421,7 @@ export async function runContainerAgent(
         resolve({
           status: 'error',
           result: null,
-          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          error: formatUserFacingContainerError(code, stderr, stdout),
         });
         return;
       }
