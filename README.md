@@ -36,6 +36,7 @@ Welcome to join our WeChat group to discuss and exchange ideas! Scan the QR code
 ## Contents
 
 - [Overview](#overview)
+- [What's New](#whats-new)
 - [Quick Start](#quick-start)
 - [Messaging channels](#messaging-channels)
 - [Demo Examples](#demo-examples)
@@ -60,6 +61,18 @@ The rapid growth of biomedical data, tools, and literature has created a fragmen
 - **Workspace Management** — Triage files, recommend analysis steps, and manage shared group workspaces
 
 Results — including images, plots, and structured reports — are delivered directly back to the chat.
+
+## What's New
+
+Recent updates make BioClaw feel much closer to a real multi-chat research workspace:
+
+- **Multiple web chats, each with its own memory** — the local web UI now lets you open separate threads like ChatGPT, so one chat can stay on literature search while another focuses on QC or plotting.
+- **A built-in control layer in chat** — you can now manage the current thread directly in chat with commands like `/status`, `/doctor`, `/threads`, `/new`, `/use`, `/rename`, `/archive`, `/workspace`, `/provider`, and `/model`.
+- **Per-thread working directory** — `/dir` lets each thread remember its own default folder inside the workspace, so different chats can work in different subdirectories without stepping on each other.
+- **Reusable shortcuts for recurring workflows** — `/commands` and `/alias` let you save common prompts as short commands, so repeated lab routines do not need to be typed from scratch every time.
+- **Skill visibility and preference control** — `/skills` shows the installed BioClaw skill modules and lets you mark preferred ones for the current thread or agent.
+- **Better local web management** — the browser UI now has a thread list, rename/archive controls, and a lightweight management panel for status and diagnostics.
+- **Quick OpenRouter health check** — `npm run check:openrouter` sends a tiny test request using your current `.env` so you can tell whether the key works before debugging the full app.
 
 ## Quick Start
 
@@ -380,6 +393,7 @@ All utility scripts are in the `scripts/` directory:
 | `npm run web` | `scripts/start-web.mjs` | Start BioClaw with local web UI (chat + lab trace) |
 | `npm run open:web` | `scripts/open-local-web.mjs` | Open the web UI in default browser |
 | `npm run stop:web` | `scripts/stop-bioclaw-web.mjs` | Stop the web server process |
+| `npm run check:openrouter` | `scripts/check-openrouter.mjs` | Send a minimal test request to OpenRouter using the current `.env` |
 | `bash scripts/clear-local-web.sh` | `scripts/clear-local-web.sh` | Clear all local-web chat history and trace events |
 | `npx tsx scripts/test-cli.ts "prompt"` | `scripts/test-cli.ts` | Run a single prompt through the container agent (CLI test) |
 | `npx tsx scripts/manage-groups.ts list` | `scripts/manage-groups.ts` | Manage WhatsApp group registrations (list / register / remove) |

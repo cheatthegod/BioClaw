@@ -24,6 +24,7 @@
 ## 目录
 
 - [概览](#概览)
+- [这版新增了什么](#这版新增了什么)
 - [快速开始](#快速开始)
 - [消息通道](#消息通道)
 - [示例演示](#示例演示)
@@ -45,6 +46,18 @@ BioClaw 将常见的生物信息学任务带到聊天界面中。研究者可以
 - 基于图片的湿实验结果解读（支持 WhatsApp 拍照或上传图片，如 SDS-PAGE 条带质量与目标条带匹配判断）
 
 默认通道为 WhatsApp；飞书、企业微信、Discord、Slack、微信（已全面支持）、本地网页等配置见 **[docs/CHANNELS.zh-CN.md](docs/CHANNELS.zh-CN.md)**。飞书的完整配置、OpenRouter 设置、群聊限制与排障见 **[docs/FEISHU_SETUP.zh-CN.md](docs/FEISHU_SETUP.zh-CN.md)**。QQ 相关截图仍为路线图示意，详见该文档。
+
+## 这版新增了什么
+
+最近这版更新，BioClaw 用起来更像一个真正可管理的研究工作台了：
+
+- **Web 端支持多个独立对话**：现在本地网页可以像 ChatGPT 一样开多个 chat，每个 thread 都有自己独立的记忆，不会互相串话。
+- **聊天里就能直接管理系统**：现在可以直接在聊天中用 `/status`、`/doctor`、`/threads`、`/new`、`/use`、`/rename`、`/archive`、`/workspace`、`/provider`、`/model` 这些命令，不用总靠改配置文件。
+- **每个 thread 都能记住自己的工作目录**：通过 `/dir`，不同 thread 可以固定在不同子目录里工作，做质控、画图、查文献时不容易互相打架。
+- **常用流程可以存成短命令**：用 `/commands` 和 `/alias` 可以把常见分析流程存成自己的快捷命令，后面直接一句话调出来。
+- **可以看到并选择偏好的 skills**：现在 `/skills` 能列出当前内置技能，还能给当前 thread 或 agent 标记偏好的 skill。
+- **本地网页更好用了**：现在 web 里有 thread 列表、重命名/归档按钮，还有一个轻量管理面板，可以直接看状态和做基本排查。
+- **OpenRouter 可以先做健康检查**：新增 `npm run check:openrouter`，会用当前 `.env` 发一个最小请求，先确认 key 能不能真正调模型。
 
 ## 快速开始
 
@@ -255,6 +268,7 @@ BioClaw 基于 NanoClaw 的容器化架构，并融合 STELLA 的生物医学能
 | `npm run web` | `scripts/start-web.mjs` | 启动 BioClaw 本地 Web 界面（聊天 + 实验追踪） |
 | `npm run open:web` | `scripts/open-local-web.mjs` | 用默认浏览器打开 Web 界面 |
 | `npm run stop:web` | `scripts/stop-bioclaw-web.mjs` | 停止 Web 服务进程 |
+| `npm run check:openrouter` | `scripts/check-openrouter.mjs` | 用当前 `.env` 对 OpenRouter 发一个最小测试请求 |
 | `bash scripts/clear-local-web.sh` | `scripts/clear-local-web.sh` | 清空本地 Web 聊天记录和追踪事件 |
 | `npx tsx scripts/test-cli.ts "prompt"` | `scripts/test-cli.ts` | 单次 CLI 测试：发送一个 prompt 到容器 |
 | `npx tsx scripts/manage-groups.ts list` | `scripts/manage-groups.ts` | 管理 WhatsApp 群组注册（list / register / remove） |
