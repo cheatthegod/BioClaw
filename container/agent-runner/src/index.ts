@@ -909,11 +909,15 @@ async function runQuery(
                 timestamp: new Date().toISOString(),
               });
             } else if (b.type === 'tool_use') {
+              const rawInput = JSON.stringify(b.input ?? {});
               writeIpcFile(IPC_MESSAGES_DIR, {
                 type: 'agent_step',
                 stepType: 'tool_use',
                 toolName: b.name as string,
-                toolInput: JSON.stringify(b.input ?? {}).slice(0, 1000),
+                // Keep short preview for trace display
+                toolInput: rawInput.slice(0, 1000),
+                // Full input for notebook export (Bash commands, Write content, etc.)
+                toolInputFull: rawInput.length > 1000 ? rawInput : undefined,
                 groupFolder: containerInput.groupFolder,
                 timestamp: new Date().toISOString(),
               });

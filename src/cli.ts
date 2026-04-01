@@ -14,6 +14,7 @@ import {
   DATA_DIR,
 } from './config.js';
 import { buildContainerArgs, spawnContainer, VolumeMount } from './container-runtime.js';
+import { readSecrets } from './credential-proxy.js';
 import { logger } from './logger.js';
 import { syncContainerSkillsToSession } from './sync-container-skills.js';
 
@@ -46,37 +47,6 @@ function ensureDirs() {
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(DATA_DIR, 'sessions', GROUP_FOLDER, '.claude', 'skills');
   syncContainerSkillsToSession(skillsSrc, skillsDst);
-}
-
-function readSecrets(): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
-  if (!fs.existsSync(envFile)) return {};
-  const secrets: Record<string, string> = {};
-  for (const line of fs.readFileSync(envFile, 'utf-8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    let value = trimmed.slice(eqIdx + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    if ([
-      'ANTHROPIC_API_KEY',
-      'CLAUDE_CODE_OAUTH_TOKEN',
-      'MODEL_PROVIDER',
-      'OPENROUTER_API_KEY',
-      'OPENROUTER_BASE_URL',
-      'OPENROUTER_MODEL',
-      'OPENAI_COMPATIBLE_API_KEY',
-      'OPENAI_COMPATIBLE_BASE_URL',
-      'OPENAI_COMPATIBLE_MODEL',
-    ].includes(key) && value) {
-      secrets[key] = value;
-    }
-  }
-  return secrets;
 }
 
 async function runAgent(prompt: string): Promise<string> {

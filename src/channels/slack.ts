@@ -188,7 +188,8 @@ export class SlackChannel implements Channel {
       return;
     }
 
-    const chunks = splitMessage(text, SLACK_TEXT_CHUNK);
+    const mrkdwn = markdownToSlack(text);
+    const chunks = splitMessage(mrkdwn, SLACK_TEXT_CHUNK);
     for (const chunk of chunks) {
       await this.app.client.chat.postMessage({ channel: channelId, text: chunk });
     }
@@ -234,6 +235,37 @@ function slackTsToIso(ts: string): string {
   const n = parseFloat(ts);
   if (Number.isNaN(n)) return new Date().toISOString();
   return new Date(Math.floor(n * 1000)).toISOString();
+}
+
+/**
+ * Convert standard Markdown to Slack mrkdwn.
+ * Handles bold, italic, strikethrough, links, headings, and code blocks.
+ * Leaves code blocks (``` and inline `) untouched since Slack uses the same syntax.
+ */
+function markdownToSlack(md: string): string {
+  // Split on fenced code blocks to avoid transforming content inside them
+  const parts = md.split(/(```[\s\S]*?```)/g);
+  for (let i = 0; i < parts.length; i++) {
+    // Odd indices are code blocks — skip them
+    if (i % 2 === 1) continue;
+
+    let t = parts[i];
+    // Links: [text](url) → <url|text>
+    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>');
+    // Bold: **text** or __text__ → *text*
+    t = t.replace(/\*\*(.+?)\*\*/g, '*$1*');
+    t = t.replace(/__(.+?)__/g, '*$1*');
+    // Italic: *text* (single, not already bold) or _text_ → _text_
+    // Only convert single * that aren't part of ** (already handled above)
+    t = t.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '_$1_');
+    // Strikethrough: ~~text~~ → ~text~
+    t = t.replace(/~~(.+?)~~/g, '~$1~');
+    // Headings: # text → *text*
+    t = t.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+
+    parts[i] = t;
+  }
+  return parts.join('');
 }
 
 function splitMessage(text: string, limit: number): string[] {

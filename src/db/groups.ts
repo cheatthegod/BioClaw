@@ -1,26 +1,20 @@
 import { getDb } from './connection.js';
-import { RegisteredGroup } from '../types.js';
+import { safeJsonParse } from './utils.js';
+import { RegisteredGroup, ContainerConfig } from '../types.js';
 
-export function getRegisteredGroup(
-  jid: string,
-): (RegisteredGroup & { jid: string }) | undefined {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
-    .get(jid) as
-    | {
-        jid: string;
-        name: string;
-      folder: string;
-      workspace_folder: string | null;
-      trigger_pattern: string;
-      added_at: string;
-      container_config: string | null;
-      requires_trigger: number | null;
-      archived: number | null;
-      }
-    | undefined;
-  if (!row) return undefined;
+interface GroupRow {
+  jid: string;
+  name: string;
+  folder: string;
+  workspace_folder: string | null;
+  trigger_pattern: string;
+  added_at: string;
+  container_config: string | null;
+  requires_trigger: number | null;
+  archived: number | null;
+}
+
+function mapRow(row: GroupRow): RegisteredGroup & { jid: string } {
   return {
     jid: row.jid,
     name: row.name,
@@ -28,12 +22,20 @@ export function getRegisteredGroup(
     workspaceFolder: row.workspace_folder || row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    containerConfig: safeJsonParse<ContainerConfig | undefined>(row.container_config, undefined),
     requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     archived: row.archived === 1,
   };
+}
+
+export function getRegisteredGroup(
+  jid: string,
+): (RegisteredGroup & { jid: string }) | undefined {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
+    .get(jid) as GroupRow | undefined;
+  return row ? mapRow(row) : undefined;
 }
 
 export function setRegisteredGroup(
@@ -61,31 +63,11 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   const db = getDb();
   const rows = db
     .prepare('SELECT * FROM registered_groups')
-    .all() as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    workspace_folder: string | null;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-    archived: number | null;
-  }>;
+    .all() as GroupRow[];
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
-    result[row.jid] = {
-      name: row.name,
-      folder: row.folder,
-      workspaceFolder: row.workspace_folder || row.folder,
-      trigger: row.trigger_pattern,
-      added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
-      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      archived: row.archived === 1,
-    };
+    const mapped = mapRow(row);
+    result[row.jid] = mapped;
   }
   return result;
 }

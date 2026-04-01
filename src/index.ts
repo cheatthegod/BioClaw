@@ -32,6 +32,7 @@ import {
 } from './config.js';
 import { recordAgentTraceEvent } from './agent-trace.js';
 import { ContainerOutput, runContainerAgent } from './container-runner.js';
+import { exportNotebook } from './notebook-export.js';
 import { checkRuntime, cleanupOrphans } from './container-runtime.js';
 import { writeGroupsSnapshot, writeTasksSnapshot } from './group-folder.js';
 import {
@@ -366,6 +367,8 @@ async function runAgent(
   const registeredGroups = getRegisteredGroupsMap();
   writeGroupsSnapshot(agentId, isMain, availableGroups, new Set(Object.keys(registeredGroups)));
 
+  const runStartedAt = new Date().toISOString();
+
   const wrappedOnOutput = onOutput
     ? async (out: ContainerOutput) => {
         if (out.newSessionId) updateSession(agentId, out.newSessionId);
@@ -397,11 +400,20 @@ async function runAgent(
       wrappedOnOutput,
     );
     if (out.newSessionId) updateSession(agentId, out.newSessionId);
+    const runEndedAt = new Date().toISOString();
     recordAgentTraceEvent({
       group_folder: workspaceFolder, chat_jid: chatJid,
       session_id: getSessions()[agentId] ?? null,
       type: 'run_end', payload: { status: out.status, error: out.error ?? null },
     });
+
+    // Async notebook export — non-blocking, delayed to allow IPC events to settle
+    if (out.status === 'success') {
+      setTimeout(() => {
+        exportNotebook(workspaceFolder, runStartedAt, runEndedAt, prompt);
+      }, 2000);
+    }
+
     if (out.status === 'error') { logger.error({ group: group.name, error: out.error }, 'Container agent error'); return 'error'; }
     return 'success';
   } catch (err) {

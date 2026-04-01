@@ -84,8 +84,6 @@ function createSchema(database: Database.Database): void {
       requires_trigger INTEGER DEFAULT 1,
       archived INTEGER DEFAULT 0
     );
-    CREATE INDEX IF NOT EXISTS idx_registered_groups_workspace_folder
-      ON registered_groups(workspace_folder);
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
       workspace_folder TEXT NOT NULL,
@@ -167,6 +165,11 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  database.exec(
+    `CREATE INDEX IF NOT EXISTS idx_registered_groups_workspace_folder
+       ON registered_groups(workspace_folder)`,
+  );
 
   try {
     database.exec(

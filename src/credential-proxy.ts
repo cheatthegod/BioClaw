@@ -5,8 +5,7 @@
  * Future enhancement: run an HTTP proxy that intercepts API calls from containers
  * and injects credentials on the fly, so containers never see raw API keys at all.
  */
-import fs from 'fs';
-import path from 'path';
+import { readEnvFile } from './env.js';
 
 const ALLOWED_VARS = [
   'CLAUDE_CODE_OAUTH_TOKEN',
@@ -25,28 +24,11 @@ const ALLOWED_VARS = [
  * Secrets are never written to disk or mounted as files.
  */
 export function readSecrets(): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
-  if (!fs.existsSync(envFile)) return {};
-
+  const allVars = readEnvFile();
   const secrets: Record<string, string> = {};
-  const content = fs.readFileSync(envFile, 'utf-8');
-
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    if (!ALLOWED_VARS.includes(key as typeof ALLOWED_VARS[number])) continue;
-    let value = trimmed.slice(eqIdx + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
+  for (const key of ALLOWED_VARS) {
+    const value = allVars[key];
     if (value) secrets[key] = value;
   }
-
   return secrets;
 }

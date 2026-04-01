@@ -1,77 +1,51 @@
 import { getDb } from './connection.js';
-import { AgentDefinition, AgentRuntimeConfig } from '../types.js';
+import { safeJsonParse } from './utils.js';
+import { AgentDefinition, AgentRuntimeConfig, ContainerConfig } from '../types.js';
 
-export function getAgent(id: string): AgentDefinition | undefined {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM agents WHERE id = ?')
-    .get(id) as
-    | {
-        id: string;
-        workspace_folder: string;
-        name: string;
-        description: string | null;
-        system_prompt: string | null;
-        runtime_config: string | null;
-        container_config: string | null;
-        created_at: string;
-        updated_at: string | null;
-        archived: number | null;
-      }
-    | undefined;
-  if (!row) return undefined;
+interface AgentRow {
+  id: string;
+  workspace_folder: string;
+  name: string;
+  description: string | null;
+  system_prompt: string | null;
+  runtime_config: string | null;
+  container_config: string | null;
+  created_at: string;
+  updated_at: string | null;
+  archived: number | null;
+}
+
+function mapRow(row: AgentRow): AgentDefinition {
   return {
     id: row.id,
     workspaceFolder: row.workspace_folder,
     name: row.name,
     description: row.description || undefined,
     systemPrompt: row.system_prompt || undefined,
-    runtimeConfig: row.runtime_config
-      ? JSON.parse(row.runtime_config) as AgentRuntimeConfig
-      : undefined,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    runtimeConfig: safeJsonParse<AgentRuntimeConfig | undefined>(row.runtime_config, undefined),
+    containerConfig: safeJsonParse<ContainerConfig | undefined>(row.container_config, undefined),
     createdAt: row.created_at,
     updatedAt: row.updated_at || undefined,
     archived: row.archived === 1,
   };
 }
 
+export function getAgent(id: string): AgentDefinition | undefined {
+  const db = getDb();
+  const row = db
+    .prepare('SELECT * FROM agents WHERE id = ?')
+    .get(id) as AgentRow | undefined;
+  return row ? mapRow(row) : undefined;
+}
+
 export function getAllAgents(): Record<string, AgentDefinition> {
   const db = getDb();
   const rows = db
     .prepare('SELECT * FROM agents WHERE archived = 0 OR archived IS NULL')
-    .all() as Array<{
-      id: string;
-      workspace_folder: string;
-      name: string;
-      description: string | null;
-      system_prompt: string | null;
-      runtime_config: string | null;
-      container_config: string | null;
-      created_at: string;
-      updated_at: string | null;
-      archived: number | null;
-    }>;
+    .all() as AgentRow[];
   const result: Record<string, AgentDefinition> = {};
   for (const row of rows) {
-    result[row.id] = {
-      id: row.id,
-      workspaceFolder: row.workspace_folder,
-      name: row.name,
-      description: row.description || undefined,
-      systemPrompt: row.system_prompt || undefined,
-      runtimeConfig: row.runtime_config
-        ? JSON.parse(row.runtime_config) as AgentRuntimeConfig
-        : undefined,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at || undefined,
-      archived: row.archived === 1,
-    };
+    result[row.id] = mapRow(row);
   }
   return result;
 }

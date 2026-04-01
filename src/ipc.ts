@@ -148,17 +148,22 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                 }
               } else if (data.type === 'agent_step') {
+                const tracePayload: Record<string, unknown> = {
+                  stepType: data.stepType,
+                  text: data.text ?? null,
+                  toolName: data.toolName ?? null,
+                  toolInput: data.toolInput ?? null,
+                };
+                // Preserve full tool input for notebook export when available
+                if (data.toolInputFull) {
+                  tracePayload.toolInputFull = data.toolInputFull;
+                }
                 recordAgentTraceEvent({
                   group_folder: sourceWorkspaceFolder,
                   chat_jid: data.chatJid ?? null,
                   session_id: null,
                   type: `agent_${data.stepType}`,
-                  payload: {
-                    stepType: data.stepType,
-                    text: data.text ?? null,
-                    toolName: data.toolName ?? null,
-                    toolInput: data.toolInput ?? null,
-                  },
+                  payload: tracePayload,
                 });
               }
               fs.unlinkSync(filePath);
