@@ -11,6 +11,11 @@
   var AUTH_TOKEN = cfg.authToken || '';
   var STREAM_QS = cfg.streamQs || '';
   var THREAD_KEY = 'bioclaw-web-thread-jid';
+  var THEME_KEY = 'bioclaw-theme';
+  var COMPOSER_HEIGHT_KEY = 'bioclaw-composer-height';
+  var MAIN_SPLIT_KEY = 'bioclaw-main-left-size';
+  var THREAD_SPLIT_KEY = 'bioclaw-thread-rail-width';
+  var TRACE_SPLIT_KEY = 'bioclaw-trace-sidebar-width';
   var threads = [];
 
   // Set session JID in settings drawer
@@ -20,15 +25,21 @@
 const LANG_KEY = 'bioclaw-web-lang';
 
     const unifiedRoot = document.getElementById('unifiedRoot');
+    const unifiedLayout = document.getElementById('unifiedLayout');
     const tabTraceBtn = document.getElementById('tabTraceBtn');
     const tabChatBtn = document.getElementById('tabChatBtn');
     const panelTrace = document.getElementById('panelTrace');
     const panelChat = document.getElementById('panelChat');
+    const mainPanelResizer = document.getElementById('mainPanelResizer');
+    const chatShell = document.querySelector('.chat-shell');
+    const threadRail = document.querySelector('.thread-rail');
+    const threadRailResizer = document.getElementById('threadRailResizer');
     const threadListEl = document.getElementById('threadList');
     const newThreadBtn = document.getElementById('newThreadBtn');
     const messagesEl = document.getElementById('messages');
     const form = document.getElementById('composer');
     const input = document.getElementById('text');
+    const composerResizer = document.getElementById('composerResizer');
     const fileInput = document.getElementById('file');
     const fileNameEl = document.getElementById('filename');
     const sendBtn = document.getElementById('send');
@@ -54,7 +65,10 @@ const LANG_KEY = 'bioclaw-web-lang';
     const manageStatusPanel = document.getElementById('manageStatusPanel');
     const manageDoctorPanel = document.getElementById('manageDoctorPanel');
 
+    const traceMain = document.querySelector('.trace-main');
     const timeline = document.getElementById('timeline');
+    const traceSidebar = document.querySelector('.trace-sidebar');
+    const traceSidebarResizer = document.getElementById('traceSidebarResizer');
     const groupSel = document.getElementById('group');
     const treeEl = document.getElementById('tree');
     const traceStreamCb = document.getElementById('traceShowStream');
@@ -101,7 +115,18 @@ const LANG_KEY = 'bioclaw-web-lang';
         lblStatusPanel: '状态',
         lblDoctorPanel: '诊断',
         langToggle: 'English',
-        themeToggle: '切换浅色 / 深色',
+        themeLight: '浅色主题',
+        themeDark: '深色主题',
+        themeSwitchToLight: '切换到浅色主题',
+        themeSwitchToDark: '切换到深色主题',
+        resizeInputAria: '调整输入框高度',
+        resizeInputTitle: '拖动这里调整输入框高度，双击恢复默认高度',
+        resizePanelsAria: '调整左右主栏宽度',
+        resizePanelsTitle: '拖动这里调整实验追踪和对话区域的宽度',
+        resizeThreadsAria: '调整对话列表宽度',
+        resizeThreadsTitle: '拖动这里调整左侧对话列表宽度',
+        resizeTraceAria: '调整追踪侧栏宽度',
+        resizeTraceTitle: '拖动这里调整实验追踪右侧栏宽度',
         manageRefresh: '刷新',
         manageRunCommand: '执行',
         manageCommandPlaceholder: '例如：/status 或 /workspace list',
@@ -194,7 +219,18 @@ const LANG_KEY = 'bioclaw-web-lang';
         lblStatusPanel: 'Status',
         lblDoctorPanel: 'Doctor',
         langToggle: '中文',
-        themeToggle: 'Light / dark theme',
+        themeLight: 'Light theme',
+        themeDark: 'Dark theme',
+        themeSwitchToLight: 'Switch to light theme',
+        themeSwitchToDark: 'Switch to dark theme',
+        resizeInputAria: 'Resize composer',
+        resizeInputTitle: 'Drag to resize the composer. Double-click to reset.',
+        resizePanelsAria: 'Resize main panels',
+        resizePanelsTitle: 'Drag to resize the trace and chat columns.',
+        resizeThreadsAria: 'Resize thread list',
+        resizeThreadsTitle: 'Drag to resize the thread list column.',
+        resizeTraceAria: 'Resize trace sidebar',
+        resizeTraceTitle: 'Drag to resize the trace sidebar.',
         manageRefresh: 'Refresh',
         manageRunCommand: 'Run',
         manageCommandPlaceholder: 'For example: /status or /workspace list',
@@ -290,7 +326,6 @@ const LANG_KEY = 'bioclaw-web-lang';
       document.getElementById('lblStatusPanel').textContent = t.lblStatusPanel;
       document.getElementById('lblDoctorPanel').textContent = t.lblDoctorPanel;
       langBtn.textContent = t.langToggle;
-      themeBtn.textContent = t.themeToggle;
       manageRefreshBtn.textContent = t.manageRefresh;
       manageCommandBtn.textContent = t.manageRunCommand;
       manageCommandInput.placeholder = t.manageCommandPlaceholder;
@@ -307,11 +342,28 @@ const LANG_KEY = 'bioclaw-web-lang';
       sendBtn.textContent = t.send;
       document.getElementById('i18n-sidebar-title').textContent = t.sidebarTitle;
       document.getElementById('i18n-sidebar-hint').innerHTML = t.sidebarHint;
+      if (composerResizer) {
+        composerResizer.setAttribute('aria-label', t.resizeInputAria);
+        composerResizer.title = t.resizeInputTitle;
+      }
+      if (mainPanelResizer) {
+        mainPanelResizer.setAttribute('aria-label', t.resizePanelsAria);
+        mainPanelResizer.title = t.resizePanelsTitle;
+      }
+      if (threadRailResizer) {
+        threadRailResizer.setAttribute('aria-label', t.resizeThreadsAria);
+        threadRailResizer.title = t.resizeThreadsTitle;
+      }
+      if (traceSidebarResizer) {
+        traceSidebarResizer.setAttribute('aria-label', t.resizeTraceAria);
+        traceSidebarResizer.title = t.resizeTraceTitle;
+      }
       var hasFile = fileInput.files && fileInput.files[0];
       fileNameEl.textContent = hasFile ? fileInput.files[0].name : t.noFile;
       if (!groupSel.value) treeEl.textContent = t.treePick;
       if (manageStatusPanel && !manageStatusPanel.textContent) manageStatusPanel.textContent = t.manageEmpty;
       if (manageDoctorPanel && !manageDoctorPanel.textContent) manageDoctorPanel.textContent = t.manageEmpty;
+      syncThemeUi();
       renderThreads();
       if (lastConnMode === null) {
         connDot.classList.remove('live', 'poll');
@@ -859,6 +911,7 @@ const LANG_KEY = 'bioclaw-web-lang';
     function applyLayout() {
       var wide = isWide();
       unifiedRoot.classList.toggle('unified-wide', wide);
+      applyStoredPanelSizes();
       if (wide) {
         panelChat.classList.remove('hidden-narrow');
         panelTrace.classList.remove('hidden-narrow');
@@ -889,6 +942,9 @@ const LANG_KEY = 'bioclaw-web-lang';
     tabTraceBtn.addEventListener('click', function () { setTab('trace'); });
     tabChatBtn.addEventListener('click', function () { setTab('chat'); });
     window.matchMedia('(min-width: 1100px)').addEventListener('change', applyLayout);
+    window.matchMedia('(min-width: 981px)').addEventListener('change', applyStoredPanelSizes);
+    window.matchMedia('(min-width: 701px)').addEventListener('change', applyStoredPanelSizes);
+    window.addEventListener('resize', applyStoredPanelSizes);
 
     (function bootTabFromUrl() {
       var p = new URLSearchParams(window.location.search);
@@ -913,20 +969,263 @@ const LANG_KEY = 'bioclaw-web-lang';
       refreshMessages();
     });
 
-    function loadTheme() {
-      var th = localStorage.getItem('bioclaw-theme');
-      if (th === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    function currentTheme() {
+      return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    }
+
+    function syncThemeUi() {
+      var t = T();
+      var isLight = currentTheme() === 'light';
+      themeBtn.textContent = isLight ? t.themeLight : t.themeDark;
+      themeBtn.title = isLight ? t.themeSwitchToDark : t.themeSwitchToLight;
+      themeBtn.setAttribute('aria-label', themeBtn.title);
+    }
+
+    function setTheme(theme, persist) {
+      if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
       else document.documentElement.removeAttribute('data-theme');
+      if (persist) {
+        try { localStorage.setItem(THEME_KEY, theme === 'light' ? 'light' : 'dark'); } catch (e) {}
+      }
+      syncThemeUi();
+    }
+
+    function loadTheme() {
+      var th = null;
+      try { th = localStorage.getItem(THEME_KEY); } catch (e) {}
+      if (!th && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) th = 'light';
+      setTheme(th === 'light' ? 'light' : 'dark', false);
     }
     loadTheme();
     themeBtn.addEventListener('click', function () {
-      if (document.documentElement.getAttribute('data-theme') === 'light') {
-        document.documentElement.removeAttribute('data-theme');
-        localStorage.setItem('bioclaw-theme', 'dark');
-      } else {
-        document.documentElement.setAttribute('data-theme', 'light');
-        localStorage.setItem('bioclaw-theme', 'light');
+      setTheme(currentTheme() === 'light' ? 'dark' : 'light', true);
+    });
+
+    function clampComposerHeight(value) {
+      var viewportMax = Math.floor(window.innerHeight * 0.56);
+      return Math.max(104, Math.min(viewportMax, Math.round(value || 0)));
+    }
+
+    function setComposerHeight(value, persist) {
+      var height = clampComposerHeight(value);
+      input.style.height = height + 'px';
+      if (persist) {
+        try { localStorage.setItem(COMPOSER_HEIGHT_KEY, String(height)); } catch (e) {}
       }
+    }
+
+    (function loadComposerHeight() {
+      var stored = null;
+      try { stored = localStorage.getItem(COMPOSER_HEIGHT_KEY); } catch (e) {}
+      setComposerHeight(stored ? Number(stored) : 148, false);
+    })();
+
+    if (composerResizer) {
+      var resizeState = null;
+
+      function finishComposerResize(event) {
+        if (!resizeState) return;
+        if (event && resizeState.pointerId != null && event.pointerId != null && event.pointerId !== resizeState.pointerId) return;
+        document.body.classList.remove('is-resizing-composer');
+        setComposerHeight(input.getBoundingClientRect().height, true);
+        resizeState = null;
+      }
+
+      composerResizer.addEventListener('pointerdown', function (event) {
+        event.preventDefault();
+        resizeState = {
+          pointerId: event.pointerId,
+          startY: event.clientY,
+          startHeight: input.getBoundingClientRect().height,
+        };
+        composerResizer.setPointerCapture(event.pointerId);
+        document.body.classList.add('is-resizing-composer');
+      });
+
+      composerResizer.addEventListener('pointermove', function (event) {
+        if (!resizeState || event.pointerId !== resizeState.pointerId) return;
+        setComposerHeight(resizeState.startHeight + (event.clientY - resizeState.startY), false);
+      });
+
+      composerResizer.addEventListener('pointerup', finishComposerResize);
+      composerResizer.addEventListener('pointercancel', finishComposerResize);
+      composerResizer.addEventListener('dblclick', function () {
+        setComposerHeight(148, true);
+      });
+      composerResizer.addEventListener('keydown', function (event) {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Home') return;
+        event.preventDefault();
+        if (event.key === 'Home') {
+          setComposerHeight(148, true);
+          return;
+        }
+        var delta = event.key === 'ArrowDown' ? 18 : -18;
+        setComposerHeight(input.getBoundingClientRect().height + delta, true);
+      });
+      window.addEventListener('pointerup', finishComposerResize);
+    }
+
+    function readStoredNumber(key) {
+      try {
+        var raw = localStorage.getItem(key);
+        if (!raw) return null;
+        var value = Number(raw);
+        return Number.isFinite(value) ? value : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function writeStoredNumber(key, value) {
+      try { localStorage.setItem(key, String(Math.round(value))); } catch (e) {}
+    }
+
+    function clearStoredNumber(key) {
+      try { localStorage.removeItem(key); } catch (e) {}
+    }
+
+    function clampMainPanelWidth(value) {
+      if (!unifiedLayout) return 0;
+      var total = Math.max(0, unifiedLayout.getBoundingClientRect().width - 12);
+      var min = 360;
+      var max = Math.max(min, total - 360);
+      return Math.max(min, Math.min(max, Math.round(value || min)));
+    }
+
+    function clampThreadRailWidth(value) {
+      if (!chatShell) return 244;
+      var total = Math.max(0, chatShell.getBoundingClientRect().width - 12);
+      var min = 188;
+      var max = Math.max(min, Math.min(420, total - 360));
+      return Math.max(min, Math.min(max, Math.round(value || 244)));
+    }
+
+    function clampTraceSidebarWidth(value) {
+      if (!traceMain) return 280;
+      var total = Math.max(0, traceMain.getBoundingClientRect().width - 12);
+      var min = 220;
+      var max = Math.max(min, Math.min(460, total - 320));
+      return Math.max(min, Math.min(max, Math.round(value || 280)));
+    }
+
+    function setMainPanelWidth(value, persist) {
+      var width = clampMainPanelWidth(value);
+      unifiedRoot.style.setProperty('--main-left-size', width + 'px');
+      if (persist) writeStoredNumber(MAIN_SPLIT_KEY, width);
+    }
+
+    function resetMainPanelWidth() {
+      unifiedRoot.style.removeProperty('--main-left-size');
+      clearStoredNumber(MAIN_SPLIT_KEY);
+    }
+
+    function setThreadRailWidth(value, persist) {
+      var width = clampThreadRailWidth(value);
+      unifiedRoot.style.setProperty('--thread-rail-w', width + 'px');
+      if (persist) writeStoredNumber(THREAD_SPLIT_KEY, width);
+    }
+
+    function resetThreadRailWidth() {
+      unifiedRoot.style.removeProperty('--thread-rail-w');
+      clearStoredNumber(THREAD_SPLIT_KEY);
+    }
+
+    function setTraceSidebarWidth(value, persist) {
+      var width = clampTraceSidebarWidth(value);
+      unifiedRoot.style.setProperty('--trace-sidebar-w', width + 'px');
+      if (persist) writeStoredNumber(TRACE_SPLIT_KEY, width);
+    }
+
+    function resetTraceSidebarWidth() {
+      unifiedRoot.style.removeProperty('--trace-sidebar-w');
+      clearStoredNumber(TRACE_SPLIT_KEY);
+    }
+
+    function applyStoredPanelSizes() {
+      var mainWidth = readStoredNumber(MAIN_SPLIT_KEY);
+      if (mainWidth != null && isWide()) setMainPanelWidth(mainWidth, false);
+
+      var railWidth = readStoredNumber(THREAD_SPLIT_KEY);
+      if (railWidth != null && window.matchMedia('(min-width: 981px)').matches) setThreadRailWidth(railWidth, false);
+
+      var traceWidth = readStoredNumber(TRACE_SPLIT_KEY);
+      if (traceWidth != null && window.matchMedia('(min-width: 701px)').matches) setTraceSidebarWidth(traceWidth, false);
+    }
+
+    function installHorizontalResizer(handle, opts) {
+      if (!handle) return;
+      var state = null;
+
+      function finishResize(event) {
+        if (!state) return;
+        if (event && state.pointerId != null && event.pointerId != null && event.pointerId !== state.pointerId) return;
+        document.body.classList.remove('is-resizing-layout');
+        opts.persist(opts.current());
+        state = null;
+      }
+
+      handle.addEventListener('pointerdown', function (event) {
+        if (!opts.enabled()) return;
+        event.preventDefault();
+        state = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startValue: opts.current(),
+        };
+        handle.setPointerCapture(event.pointerId);
+        document.body.classList.add('is-resizing-layout');
+      });
+
+      handle.addEventListener('pointermove', function (event) {
+        if (!state || event.pointerId !== state.pointerId) return;
+        opts.setFromDrag(state.startValue, event.clientX - state.startX);
+      });
+
+      handle.addEventListener('pointerup', finishResize);
+      handle.addEventListener('pointercancel', finishResize);
+      handle.addEventListener('dblclick', function () {
+        if (!opts.enabled()) return;
+        opts.reset();
+      });
+      handle.addEventListener('keydown', function (event) {
+        if (!opts.enabled()) return;
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home') return;
+        event.preventDefault();
+        if (event.key === 'Home') {
+          opts.reset();
+          return;
+        }
+        var delta = event.key === 'ArrowRight' ? 24 : -24;
+        opts.setFromKeyboard(delta);
+      });
+      window.addEventListener('pointerup', finishResize);
+    }
+
+    installHorizontalResizer(mainPanelResizer, {
+      enabled: function () { return isWide(); },
+      current: function () { return panelTrace.getBoundingClientRect().width; },
+      setFromDrag: function (startValue, delta) { setMainPanelWidth(startValue + delta, false); },
+      setFromKeyboard: function (delta) { setMainPanelWidth(panelTrace.getBoundingClientRect().width + delta, true); },
+      persist: function (value) { setMainPanelWidth(value, true); },
+      reset: resetMainPanelWidth,
+    });
+
+    installHorizontalResizer(threadRailResizer, {
+      enabled: function () { return window.matchMedia('(min-width: 981px)').matches; },
+      current: function () { return threadRail.getBoundingClientRect().width; },
+      setFromDrag: function (startValue, delta) { setThreadRailWidth(startValue + delta, false); },
+      setFromKeyboard: function (delta) { setThreadRailWidth(threadRail.getBoundingClientRect().width + delta, true); },
+      persist: function (value) { setThreadRailWidth(value, true); },
+      reset: resetThreadRailWidth,
+    });
+
+    installHorizontalResizer(traceSidebarResizer, {
+      enabled: function () { return window.matchMedia('(min-width: 701px)').matches; },
+      current: function () { return traceSidebar.getBoundingClientRect().width; },
+      setFromDrag: function (startValue, delta) { setTraceSidebarWidth(startValue - delta, false); },
+      setFromKeyboard: function (delta) { setTraceSidebarWidth(traceSidebar.getBoundingClientRect().width - delta, true); },
+      persist: function (value) { setTraceSidebarWidth(value, true); },
+      reset: resetTraceSidebarWidth,
     });
 
     function setSettingsOpen(open) {
