@@ -294,9 +294,11 @@ async function processAgentMessages(agentId: string): Promise<boolean> {
   }
   saveState();
 
-  // Detect summary/recap request: any trigger message contains summary keywords
+  // Detect summary/recap request: any message in the batch contains summary
+  // keywords. No need to also match TRIGGER_PATTERN here because
+  // missedMessages already passed trigger gating (or requiresTrigger=false).
   const isSummaryRequest = missedMessages.some(
-    (m) => TRIGGER_PATTERN.test(m.content.trim()) && SUMMARY_PATTERN.test(m.content),
+    (m) => SUMMARY_PATTERN.test(m.content),
   );
   let agentPrompt = prompt;
   if (isSummaryRequest) {

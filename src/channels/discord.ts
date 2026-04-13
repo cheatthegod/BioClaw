@@ -9,6 +9,7 @@ import {
 } from 'discord.js';
 
 import { logger } from '../logger.js';
+import { ASSISTANT_NAME } from '../config.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const DISCORD_JID_SUFFIX_CHANNEL = '@discord.channel';
@@ -79,7 +80,16 @@ export class DiscordChannel implements Channel {
         : `${message.author.id}${DISCORD_JID_SUFFIX_DM}`;
 
       const timestamp = message.createdAt.toISOString();
-      const content = message.content || '';
+      let content = message.content || '';
+
+      // Replace Discord's <@BOT_ID> mention with @AssistantName so trigger pattern matches
+      const botId = this.client.user?.id;
+      if (botId) {
+        content = content.replace(
+          new RegExp(`<@!?${botId}>`, 'g'),
+          `@${ASSISTANT_NAME}`,
+        );
+      }
 
       if (!content && message.attachments.size === 0) return;
 
