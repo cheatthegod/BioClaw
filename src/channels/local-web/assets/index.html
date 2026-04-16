@@ -25,26 +25,22 @@
     </header>
     <div class="unified-body">
       <div class="unified-layout" id="unifiedLayout">
-        <section id="panelTrace" class="panel panel-trace hidden-narrow" role="tabpanel" aria-labelledby="tabTraceBtn">
-          <div class="trace-toolbar">
-            <p class="trace-desc" id="traceSub"></p>
-            <div class="trace-actions">
-              <label class="fld"><span id="i18n-group-label"></span> <select id="group"><option value="" id="opt-all"></option></select></label>
-              <label class="trace-opt" for="traceShowStream"><input type="checkbox" id="traceShowStream" /><span id="traceStreamLabel"></span></label>
-              <button type="button" class="btn-trace" id="reloadTrace"></button>
+        <aside class="app-rail" aria-hidden="true">
+          <div class="app-rail-top">
+            <div class="rail-badge">B</div>
+            <div class="rail-slot is-active">
+              <span class="rail-dot"></span>
+              <span class="rail-text" id="railProject"></span>
+            </div>
+            <div class="rail-slot">
+              <span class="rail-dot"></span>
+              <span class="rail-text" id="railResults"></span>
             </div>
           </div>
-          <div class="trace-main">
-            <div id="timeline" class="timeline"></div>
-            <div class="panel-resizer panel-resizer-trace" id="traceSidebarResizer" role="separator" aria-orientation="vertical" tabindex="0"></div>
-            <aside class="trace-sidebar">
-              <strong class="sidebar-title" id="i18n-sidebar-title"></strong>
-              <p class="sidebar-hint" id="i18n-sidebar-hint"></p>
-              <div id="tree" class="tree"></div>
-            </aside>
+          <div class="app-rail-bottom">
+            <div class="rail-pill" id="railStatus"></div>
           </div>
-        </section>
-        <div class="panel-resizer panel-resizer-main" id="mainPanelResizer" role="separator" aria-orientation="vertical" tabindex="0"></div>
+        </aside>
         <section id="panelChat" class="panel panel-chat" role="tabpanel" aria-labelledby="tabChatBtn">
           <div class="chat-shell">
             <aside class="thread-rail">
@@ -55,23 +51,70 @@
                 </div>
                 <button type="button" class="primary subtle" id="newThreadBtn"></button>
               </div>
-              <div id="threadList" class="thread-list" aria-live="polite"></div>
+              <section class="rail-section rail-section-threads is-open" id="threadSection">
+                <button type="button" class="rail-section-toggle" id="threadSectionToggle" aria-expanded="true">
+                  <span class="rail-section-toggle-main">
+                    <span class="rail-section-chevron" aria-hidden="true"></span>
+                    <span class="thread-rail-label" id="threadsPanelTitle"></span>
+                  </span>
+                </button>
+                <div class="rail-section-body">
+                  <div id="threadList" class="thread-list" aria-live="polite"></div>
+                </div>
+              </section>
+              <section class="rail-section rail-section-files is-open project-file-tray" id="recentFilesSection">
+                <button type="button" class="rail-section-toggle" id="recentFilesSectionToggle" aria-expanded="true">
+                  <span class="rail-section-toggle-main">
+                    <span class="rail-section-chevron" aria-hidden="true"></span>
+                    <span class="thread-rail-label" id="recentFilesTitle"></span>
+                  </span>
+                  <span class="thread-rail-sub rail-section-sub" id="recentFilesHint"></span>
+                </button>
+                <div class="rail-section-body">
+                  <div id="recentFileList" class="project-file-list" aria-live="polite"></div>
+                </div>
+              </section>
             </aside>
             <div class="panel-resizer panel-resizer-chat" id="threadRailResizer" role="separator" aria-orientation="vertical" tabindex="0"></div>
             <div class="chat-main">
-              <div class="chat-hero"><h1 id="chatTitle"></h1><p class="subtitle" id="chatHint"></p></div>
+              <section class="welcome-shell" id="welcomeShell" aria-live="polite">
+                <div class="welcome-copy">
+                  <div class="welcome-markline">
+                    <span class="welcome-mark" aria-hidden="true"></span>
+                    <span class="welcome-kicker">BioClaw</span>
+                  </div>
+                  <h2 class="welcome-title" id="welcomeTitle"></h2>
+                  <p class="welcome-subtitle" id="welcomeSubtitle"></p>
+                </div>
+                <div class="welcome-suggestions" id="welcomeSuggestions"></div>
+              </section>
+              <div class="workspace-topbar">
+                <div class="workspace-title-group">
+                  <div class="workspace-eyebrow" id="workspaceEyebrow"></div>
+                  <h1 id="chatTitle"></h1>
+                </div>
+                <div class="workspace-view-toggle" role="tablist" aria-label="Workspace view">
+                  <button type="button" class="view-toggle-btn" id="viewConversationBtn" aria-selected="true"></button>
+                  <button type="button" class="view-toggle-btn" id="viewArtifactBtn" aria-selected="false"></button>
+                </div>
+              </div>
+              <p class="subtitle" id="chatHint"></p>
+              <div id="artifactStage" class="artifact-stage" aria-live="polite">
+                <div id="artifactEmpty" class="artifact-empty"></div>
+                <div id="artifactPreview" class="artifact-preview"></div>
+              </div>
+              <div class="artifact-stage-resizer" id="artifactStageResizer" role="separator" aria-orientation="horizontal" tabindex="0"></div>
               <div id="messages" class="chat-scroll" aria-live="polite"></div>
               <div class="composer-card">
                 <form id="composer">
                   <div class="composer-input-shell">
                     <textarea id="text" rows="4"></textarea>
                     <div class="composer-resizer" id="composerResizer" role="separator" aria-orientation="horizontal" tabindex="0"></div>
-                  </div>
-                  <div class="row">
-                    <div class="hint" id="uploadHint"></div>
-                    <div class="toolbar">
+                    <div class="composer-inline-bar">
+                      <div class="toolbar composer-toolbar">
                       <label class="upload"><span id="uploadLabel"></span><input id="file" type="file"></label>
                       <span id="filename" class="filename"></span>
+                      </div>
                       <button class="primary" id="send" type="submit"></button>
                     </div>
                   </div>
@@ -79,6 +122,41 @@
                 </form>
               </div>
             </div>
+          </div>
+        </section>
+        <div class="panel-resizer panel-resizer-main" id="mainPanelResizer" role="separator" aria-orientation="vertical" tabindex="0"></div>
+        <section id="panelTrace" class="panel panel-trace hidden-narrow" role="tabpanel" aria-labelledby="tabTraceBtn">
+          <div class="inspector-shell">
+            <details class="inspector-section inspector-collapsible" id="progressSection" open>
+              <summary class="inspector-summary">
+                <div>
+                  <div class="inspector-kicker" id="progressTitle"></div>
+                  <p class="trace-desc" id="traceSub"></p>
+                </div>
+              </summary>
+              <div class="inspector-section-body">
+                <div class="inspector-section-head">
+                  <div class="inspector-head-spacer"></div>
+                  <button type="button" class="btn-trace" id="reloadTrace"></button>
+                </div>
+                <div class="trace-actions">
+                  <label class="fld"><span id="i18n-group-label"></span> <select id="group"><option value="" id="opt-all"></option></select></label>
+                  <label class="trace-opt" for="traceShowStream"><input type="checkbox" id="traceShowStream" /><span id="traceStreamLabel"></span></label>
+                </div>
+                <div id="timeline" class="timeline"></div>
+              </div>
+            </details>
+            <details class="inspector-section inspector-collapsible" id="resultsSection" open>
+              <summary class="inspector-summary">
+                <div>
+                  <div class="inspector-kicker" id="resultsTitle"></div>
+                  <p class="inspector-hint" id="resultsHint"></p>
+                </div>
+              </summary>
+              <div class="inspector-section-body">
+                <div id="resultList" class="result-list" aria-live="polite"></div>
+              </div>
+            </details>
           </div>
         </section>
       </div>

@@ -21,6 +21,7 @@ import { randomUUID } from 'crypto';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
+import { detectTaskRouting, mergeSkillSelections } from './task-routing.js';
 
 interface ContainerInput {
   prompt: string;
@@ -272,12 +273,28 @@ function resolveWorkdir(workdir?: string): string {
   return target;
 }
 
-function buildEnabledSkillsBlock(enabledSkills?: string[]): string {
-  const skills = Array.isArray(enabledSkills)
-    ? enabledSkills.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-    : [];
-  if (skills.length === 0) return '';
-  return `\n\n[Preferred skill modules]\nPrefer these installed skills first when they are relevant to the task:\n${skills.map((skill) => `- ${skill}`).join('\n')}\n`;
+function buildEnabledSkillsBlock(preferredSkills?: string[], requiredSkills?: string[]): string {
+  const { preferred, required } = mergeSkillSelections(preferredSkills, requiredSkills);
+  const sections: string[] = [];
+
+  if (required.length > 0) {
+    sections.push(
+      '[Required skill modules]',
+      'You MUST use these installed skills for this task when they are relevant:',
+      ...required.map((skill) => `- ${skill}`),
+    );
+  }
+
+  if (preferred.length > 0) {
+    sections.push(
+      '[Preferred skill modules]',
+      'Prefer these installed skills first when they are relevant to the task:',
+      ...preferred.map((skill) => `- ${skill}`),
+    );
+  }
+
+  if (sections.length === 0) return '';
+  return `\n\n${sections.join('\n')}\n`;
 }
 
 function writeIpcFile(dir: string, data: object): string {
@@ -451,7 +468,7 @@ function getBioSystemPrompt(): string {
     'When users ask biology questions, prefer running actual analysis over giving theoretical answers.',
     'Use tools to produce real results. Prefer the Bash tool for running shell commands, Python scripts, and bioinformatics workflows.',
     'Save output files to /workspace/group/ so users can access them.',
-    'When you generate an image file (such as PNG, JPG, or GIF), call the send_image tool so the user receives it in chat instead of only seeing a saved file path.',
+    'When you generate an image or document file (PNG, JPG, GIF, PDF, etc.), call the send_image tool so the user receives it in chat instead of only seeing a saved file path. The send_image tool works for ALL file types including PDF reports.',
     "If you generate plots with Chinese labels via matplotlib, configure a Chinese-capable font first (try: 'Noto Sans CJK SC' or 'WenQuanYi Zen Hei') and set axes.unicode_minus=False to avoid missing glyphs and minus-sign issues.",
     'Prioritize figures that look scientific, readable on a phone screen, and suitable for demos or slide decks.',
     'Avoid overcrowded labels, tiny fonts, excessive legends, rainbow color noise, and default low-quality plotting styles.',
@@ -478,6 +495,7 @@ function getBioSystemPrompt(): string {
           'Do not claim a skill is unavailable if it appears in the installed list above.',
           'To use a skill, read its full instructions with: read_file({ file_path: "/home/node/.claude/skills/<skill-name>/SKILL.md" })',
           'Always read the relevant SKILL.md before executing a skill-related task — the summaries above are abbreviated.',
+          'CRITICAL: When a skill provides executable scripts or pipelines (e.g. python sec_pipeline.py), you MUST run them as instructed. Do NOT manually reimplement the same analysis logic — the bundled scripts are tested, produce standardized outputs (PDF reports, figures, JSON), and are the expected deliverable. Manual reimplementation is an error.',
         ]
       : []),
     'For publication-ready figures (Cell/Nature/Science style): use cnsplots (volcano, box, heatmap, etc.). For genome browser tracks: use pyGenomeTracks with make_tracks_file + pyGenomeTracks.',
@@ -485,6 +503,36 @@ function getBioSystemPrompt(): string {
     'Keep messages concise and action-oriented, and mention important output file paths when relevant.',
     '',
   ].join('\n');
+}
+
+function buildGlobalSystemPrompt(
+  prompt: string,
+  currentWorkdir: string,
+  containerInput: ContainerInput,
+): string {
+  const bioSystemPrompt = getBioSystemPrompt()
+    .replace('send_image tool', 'mcp__bioclaw__send_image')
+    .replace('Use tools to produce real results. Prefer the Bash tool for running shell commands, Python scripts, and bioinformatics workflows.', 'Write and execute Python scripts or bash commands to produce real results.');
+
+  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalContent = fs.existsSync(globalClaudeMdPath)
+    ? fs.readFileSync(globalClaudeMdPath, 'utf-8')
+    : '';
+  const agentMemoryBlock = containerInput.agentSystemPrompt
+    ? `\n\n[Agent memory]\n${containerInput.agentSystemPrompt.trim()}\n`
+    : '';
+  const taskRouting = detectTaskRouting(prompt);
+  if (taskRouting) {
+    log(`Applied automatic task routing: ${taskRouting.matchedRoute}`);
+  }
+  const enabledSkillsBlock = buildEnabledSkillsBlock(
+    containerInput.runtimeConfig?.enabledSkills,
+    taskRouting?.requiredSkills,
+  );
+  const routingBlock = taskRouting?.systemBlock || '';
+  const workdirBlock = `\n\n[Current working directory]\n${currentWorkdir}\n`;
+
+  return bioSystemPrompt + globalContent + agentMemoryBlock + enabledSkillsBlock + routingBlock + workdirBlock;
 }
 
 function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
@@ -813,23 +861,7 @@ async function runQuery(
   let resultCount = 0;
   const currentWorkdir = resolveWorkdir(containerInput.workdir);
 
-  // BioClaw: inject biology-specific system context
-  const bioSystemPrompt = getBioSystemPrompt()
-    .replace('send_image tool', 'mcp__bioclaw__send_image')
-    .replace('Use tools to produce real results. Prefer the Bash tool for running shell commands, Python scripts, and bioinformatics workflows.', 'Write and execute Python scripts or bash commands to produce real results.');
-
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
-  const globalContent = fs.existsSync(globalClaudeMdPath)
-    ? fs.readFileSync(globalClaudeMdPath, 'utf-8')
-    : '';
-  const agentMemoryBlock = containerInput.agentSystemPrompt
-    ? `\n\n[Agent memory]\n${containerInput.agentSystemPrompt.trim()}\n`
-    : '';
-  const enabledSkillsBlock = buildEnabledSkillsBlock(containerInput.runtimeConfig?.enabledSkills);
-  const workdirBlock = `\n\n[Current working directory]\n${currentWorkdir}\n`;
-  globalClaudeMd = bioSystemPrompt + globalContent + agentMemoryBlock + enabledSkillsBlock + workdirBlock;
+  const globalClaudeMd = buildGlobalSystemPrompt(prompt, currentWorkdir, containerInput);
 
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
@@ -990,7 +1022,7 @@ function getOpenAICompatibleTools() {
       type: 'function',
       function: {
         name: 'send_image',
-        description: 'Send an image file from the container to the current chat.',
+        description: 'Send a file (image, PDF, or other document) from the container to the current chat. Use this for PNG, JPG, GIF, PDF, and any other file the user should receive.',
         parameters: {
           type: 'object',
           properties: {
@@ -1259,24 +1291,16 @@ async function runOpenAICompatibleConversation(
 ): Promise<{ newSessionId: string; closedDuringQuery: boolean; messages: OpenAIChatMessage[] }> {
   const newSessionId = sessionId || `openai-compatible:${randomUUID()}`;
   const persistedMessages = existingMessages || loadOpenAICompatibleSessionMessages(newSessionId);
+  const systemPrompt = buildGlobalSystemPrompt(prompt, cwd, containerInput);
   const messages: OpenAIChatMessage[] = persistedMessages
-    ? [...persistedMessages, { role: 'user', content: prompt }]
-    : (() => {
-        const bioSystemPrompt = getBioSystemPrompt();
-        const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-        const globalContent = fs.existsSync(globalClaudeMdPath)
-          ? fs.readFileSync(globalClaudeMdPath, 'utf-8')
-          : '';
-        const agentMemoryBlock = containerInput.agentSystemPrompt
-          ? `\n\n[Agent memory]\n${containerInput.agentSystemPrompt.trim()}\n`
-          : '';
-        const enabledSkillsBlock = buildEnabledSkillsBlock(containerInput.runtimeConfig?.enabledSkills);
-        const workdirBlock = `\n\n[Current working directory]\n${cwd}\n`;
-        return [
-          { role: 'system', content: bioSystemPrompt + globalContent + agentMemoryBlock + enabledSkillsBlock + workdirBlock },
-          { role: 'user', content: prompt },
-        ];
-      })();
+    ? [...persistedMessages]
+    : [];
+  if (messages.length > 0 && messages[0]?.role === 'system') {
+    messages[0] = { role: 'system', content: systemPrompt };
+  } else {
+    messages.unshift({ role: 'system', content: systemPrompt });
+  }
+  messages.push({ role: 'user', content: prompt });
   saveOpenAICompatibleSessionMessages(newSessionId, messages);
 
   let toolIterations = 0;

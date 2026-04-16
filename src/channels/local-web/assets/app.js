@@ -6,17 +6,28 @@
     cfg = await r.json();
   } catch (e) { console.warn('Failed to load /api/config, using defaults', e); }
 
-  var chatJid = cfg.chatJid || 'local-web@local.web';
+  var DEFAULT_CHAT_JID = cfg.chatJid || 'local-web@local.web';
+  var chatJid = DEFAULT_CHAT_JID;
   var assistantName = cfg.assistantName || 'Bioclaw';
   var AUTH_TOKEN = cfg.authToken || '';
   var STREAM_QS = cfg.streamQs || '';
   var THREAD_KEY = 'bioclaw-web-thread-jid';
   var THEME_KEY = 'bioclaw-theme';
   var COMPOSER_HEIGHT_KEY = 'bioclaw-composer-height';
+  var ARTIFACT_STAGE_HEIGHT_KEY = 'bioclaw-artifact-stage-height';
   var MAIN_SPLIT_KEY = 'bioclaw-main-left-size';
   var THREAD_SPLIT_KEY = 'bioclaw-thread-rail-width';
-  var TRACE_SPLIT_KEY = 'bioclaw-trace-sidebar-width';
+  var THREAD_SECTION_OPEN_KEY = 'bioclaw-thread-section-open';
+  var FILES_SECTION_OPEN_KEY = 'bioclaw-files-section-open';
   var threads = [];
+  var currentMessages = [];
+  var artifacts = [];
+  var selectedArtifact = null;
+  var currentView = 'conversation';
+  var preArtifactComposerHeight = null;
+  var artifactGroupOpen = { pdf: true, image: true, file: true };
+  var threadSectionOpen = true;
+  var filesSectionOpen = true;
 
   // Set session JID in settings drawer
   var jidEl = document.getElementById('sessionJid');
@@ -34,16 +45,37 @@ const LANG_KEY = 'bioclaw-web-lang';
     const chatShell = document.querySelector('.chat-shell');
     const threadRail = document.querySelector('.thread-rail');
     const threadRailResizer = document.getElementById('threadRailResizer');
+    const threadSection = document.getElementById('threadSection');
+    const threadSectionToggle = document.getElementById('threadSectionToggle');
+    const recentFilesSection = document.getElementById('recentFilesSection');
+    const recentFilesSectionToggle = document.getElementById('recentFilesSectionToggle');
     const threadListEl = document.getElementById('threadList');
     const newThreadBtn = document.getElementById('newThreadBtn');
+    const recentFileListEl = document.getElementById('recentFileList');
     const messagesEl = document.getElementById('messages');
+    const artifactStage = document.getElementById('artifactStage');
+    const artifactPreviewEl = document.getElementById('artifactPreview');
+    const artifactEmptyEl = document.getElementById('artifactEmpty');
+    const welcomeShell = document.getElementById('welcomeShell');
+    const welcomeTitleEl = document.getElementById('welcomeTitle');
+    const welcomeSubtitleEl = document.getElementById('welcomeSubtitle');
+    const welcomeSuggestionsEl = document.getElementById('welcomeSuggestions');
+    const viewConversationBtn = document.getElementById('viewConversationBtn');
+    const viewArtifactBtn = document.getElementById('viewArtifactBtn');
+    const resultListEl = document.getElementById('resultList');
+    const workspaceEyebrowEl = document.getElementById('workspaceEyebrow');
+    const chatMain = document.querySelector('.chat-main');
+    const workspaceTopbar = document.querySelector('.workspace-topbar');
+    const subtitleEl = document.getElementById('chatHint');
     const form = document.getElementById('composer');
     const input = document.getElementById('text');
     const composerResizer = document.getElementById('composerResizer');
+    const artifactStageResizer = document.getElementById('artifactStageResizer');
     const fileInput = document.getElementById('file');
     const fileNameEl = document.getElementById('filename');
     const sendBtn = document.getElementById('send');
     const statusEl = document.getElementById('status');
+    const composerCard = document.querySelector('.composer-card');
     const connDot = document.getElementById('connDot');
     const connLabel = document.getElementById('connLabel');
     const connPill = document.getElementById('connPill');
@@ -64,13 +96,18 @@ const LANG_KEY = 'bioclaw-web-lang';
     const manageCommandOutput = document.getElementById('manageCommandOutput');
     const manageStatusPanel = document.getElementById('manageStatusPanel');
     const manageDoctorPanel = document.getElementById('manageDoctorPanel');
+    const railProject = document.getElementById('railProject');
+    const railResults = document.getElementById('railResults');
+    const railStatus = document.getElementById('railStatus');
+    const threadsPanelTitle = document.getElementById('threadsPanelTitle');
+    const recentFilesTitle = document.getElementById('recentFilesTitle');
+    const recentFilesHint = document.getElementById('recentFilesHint');
+    const progressTitle = document.getElementById('progressTitle');
+    const resultsTitle = document.getElementById('resultsTitle');
+    const resultsHint = document.getElementById('resultsHint');
 
-    const traceMain = document.querySelector('.trace-main');
     const timeline = document.getElementById('timeline');
-    const traceSidebar = document.querySelector('.trace-sidebar');
-    const traceSidebarResizer = document.getElementById('traceSidebarResizer');
     const groupSel = document.getElementById('group');
-    const treeEl = document.getElementById('tree');
     const traceStreamCb = document.getElementById('traceShowStream');
 
     var traceShowStream = false;
@@ -87,22 +124,46 @@ const LANG_KEY = 'bioclaw-web-lang';
 
     var I18N = {
       zh: {
-        pageTitle: 'BioClaw',
-        tabChat: '对话',
-        tabTrace: '实验追踪',
+        pageTitle: 'BioClaw 工作台',
+        tabChat: '工作台',
+        tabTrace: '进度',
         connPillTitle: '新消息',
         connConnecting: '连接中…',
-        tracePillTitle: '实验追踪',
+        tracePillTitle: '任务进度',
         traceIdle: '未连接',
         settingsTitle: '设置',
         settingsAria: '打开设置',
         closeSettingsAria: '关闭',
-        threadsTitle: '对话',
-        threadsHint: '每个对话独立保存记忆与历史。',
-        newThread: '新对话',
-        newThreadPrompt: '输入新对话标题（可留空）',
-        threadUntitled: '新对话',
-        threadEmpty: '还没有其他对话。点击右上角创建一个新的独立线程。',
+        threadsTitle: '任务',
+        threadsHint: '保存的任务。',
+        newThread: '新建',
+        newThreadPrompt: '输入新任务标题（可留空）',
+        threadUntitled: '新任务',
+        threadEmpty: '还没有任务。点击右上角创建一个新的分析线程。',
+        recentFilesTitle: '最近文件',
+        recentFilesHint: '上传与结果。',
+        recentFilesEmpty: '还没有可展示的文件。',
+        progressTitle: '进度',
+        resultsTitle: '结果',
+        resultsHint: '任务结果文件。',
+        resultsEmpty: '还没有结果文件。',
+        artifactGroupPdf: 'PDF',
+        artifactGroupImage: '图像',
+        artifactGroupFile: '文件',
+        workspaceEyebrow: '任务',
+        viewConversation: '对话',
+        viewArtifact: '结果',
+        artifactEmpty: '点击左侧或右侧的文件，在这里预览结果。',
+        welcomeTitleTpl: '你好，{name}',
+        welcomeSubtitle: '先说任务目标，或直接上传数据。开始分析后，界面会切换到工作台视图。',
+        welcomeSuggestions: ['分析 SEC 数据并生成 PDF', '阅读上传文件并总结重点', '比较不同构建体的表现', '设计下一步实验计划'],
+        welcomePlaceholder: '今天想一起处理什么任务？',
+        messageUploadSummary: '上传文件',
+        messageEmptySummary: '消息',
+        previewInStage: '查看',
+        railProject: '项目',
+        railResults: '结果',
+        railStatus: '工作台',
         secDisplay: '显示',
         secConnection: '连接',
         secControl: '控制台',
@@ -121,12 +182,12 @@ const LANG_KEY = 'bioclaw-web-lang';
         themeSwitchToDark: '切换到深色主题',
         resizeInputAria: '调整输入框高度',
         resizeInputTitle: '拖动这里调整输入框高度，双击恢复默认高度',
-        resizePanelsAria: '调整左右主栏宽度',
-        resizePanelsTitle: '拖动这里调整实验追踪和对话区域的宽度',
+        resizePanelsAria: '调整主舞台和右侧栏宽度',
+        resizePanelsTitle: '拖动这里调整主舞台和右侧进度栏的宽度',
         resizeThreadsAria: '调整对话列表宽度',
-        resizeThreadsTitle: '拖动这里调整左侧对话列表宽度',
-        resizeTraceAria: '调整追踪侧栏宽度',
-        resizeTraceTitle: '拖动这里调整实验追踪右侧栏宽度',
+        resizeThreadsTitle: '拖动这里调整左侧任务栏宽度',
+        resizeArtifactAria: '调整结果舞台高度',
+        resizeArtifactTitle: '拖动这里调整中间结果预览区域的高度，双击恢复默认高度',
         manageRefresh: '刷新',
         manageRunCommand: '执行',
         manageCommandPlaceholder: '例如：/status 或 /workspace list',
@@ -141,9 +202,9 @@ const LANG_KEY = 'bioclaw-web-lang';
         threadArchiveFail: '归档对话失败',
         threadRenameAction: '重命名',
         threadArchiveAction: '归档',
-        chatTitle: '对话',
-        chatHintTpl: 'Enter 发送 · Shift+Enter 换行 · 默认无需 @{name}',
-        traceSub: 'Agent 每次运行按思考链分组展示。默认隐藏流式输出片段；勾选下方可显示全部（适合调试）。',
+        chatTitle: '任务',
+        chatHintTpl: '继续提问或上传文件。',
+        traceSub: '查看当前任务的步骤摘要与运行过程。',
         groupLabel: '群组',
         allGroups: '全部',
         reloadTrace: '刷新',
@@ -164,8 +225,7 @@ const LANG_KEY = 'bioclaw-web-lang';
         traceContainer: '容器名',
         traceIpcKind: '类型',
         traceRawJson: '原始 JSON',
-        placeholder: '例如：用 BioPython 读取 FASTA 并统计 GC 含量…',
-        uploadHint: '上传文件会写入群组工作区，Agent 可通过路径访问。',
+        placeholder: '例如：分析这个压缩包，并生成一份简洁的报告…',
         uploadLabel: '上传文件',
         noFile: '未选择',
         send: '发送',
@@ -195,22 +255,46 @@ const LANG_KEY = 'bioclaw-web-lang';
         loadFail: '加载失败',
       },
       en: {
-        pageTitle: 'BioClaw',
-        tabChat: 'Chat',
-        tabTrace: 'Lab trace',
+        pageTitle: 'BioClaw Workspace',
+        tabChat: 'Workspace',
+        tabTrace: 'Progress',
         connPillTitle: 'Messages',
         connConnecting: 'Connecting…',
-        tracePillTitle: 'Trace',
+        tracePillTitle: 'Progress',
         traceIdle: 'Idle',
         settingsTitle: 'Settings',
         settingsAria: 'Open settings',
         closeSettingsAria: 'Close',
-        threadsTitle: 'Threads',
-        threadsHint: 'Each thread keeps its own memory and history.',
-        newThread: 'New chat',
-        newThreadPrompt: 'Enter a title for the new chat (optional)',
-        threadUntitled: 'New chat',
-        threadEmpty: 'No extra chats yet. Create a new independent thread from the button above.',
+        threadsTitle: 'Tasks',
+        threadsHint: 'Saved threads.',
+        newThread: 'New',
+        newThreadPrompt: 'Enter a title for the new task (optional)',
+        threadUntitled: 'New task',
+        threadEmpty: 'No tasks yet. Create a new analysis thread from the button above.',
+        recentFilesTitle: 'Recent files',
+        recentFilesHint: 'Uploads and outputs.',
+        recentFilesEmpty: 'No files to show yet.',
+        progressTitle: 'Progress',
+        resultsTitle: 'Results',
+        resultsHint: 'Task files.',
+        resultsEmpty: 'No result files yet.',
+        artifactGroupPdf: 'PDF',
+        artifactGroupImage: 'Images',
+        artifactGroupFile: 'Files',
+        workspaceEyebrow: 'Task',
+        viewConversation: 'Conversation',
+        viewArtifact: 'Results',
+        artifactEmpty: 'Pick a file from the left or right to preview it here.',
+        welcomeTitleTpl: 'Hello, {name}',
+        welcomeSubtitle: 'Start with a clear request or upload data first. Once the task begins, the workspace view will take over.',
+        welcomeSuggestions: ['Analyze SEC data and generate a PDF', 'Read uploaded files and summarize them', 'Compare construct performance', 'Plan the next experiment'],
+        welcomePlaceholder: 'What would you like to work on today?',
+        messageUploadSummary: 'Uploaded file',
+        messageEmptySummary: 'Message',
+        previewInStage: 'Preview',
+        railProject: 'Project',
+        railResults: 'Results',
+        railStatus: 'Workspace',
         secDisplay: 'Display',
         secConnection: 'Connection',
         secControl: 'Control',
@@ -230,11 +314,11 @@ const LANG_KEY = 'bioclaw-web-lang';
         resizeInputAria: 'Resize composer',
         resizeInputTitle: 'Drag to resize the composer. Double-click to reset.',
         resizePanelsAria: 'Resize main panels',
-        resizePanelsTitle: 'Drag to resize the trace and chat columns.',
+        resizePanelsTitle: 'Drag to resize the stage and inspector columns.',
         resizeThreadsAria: 'Resize thread list',
-        resizeThreadsTitle: 'Drag to resize the thread list column.',
-        resizeTraceAria: 'Resize trace sidebar',
-        resizeTraceTitle: 'Drag to resize the trace sidebar.',
+        resizeThreadsTitle: 'Drag to resize the task list column.',
+        resizeArtifactAria: 'Resize results stage',
+        resizeArtifactTitle: 'Drag to resize the middle results preview area. Double-click to reset.',
         manageRefresh: 'Refresh',
         manageRunCommand: 'Run',
         manageCommandPlaceholder: 'For example: /status or /workspace list',
@@ -249,9 +333,9 @@ const LANG_KEY = 'bioclaw-web-lang';
         threadArchiveFail: 'Failed to archive thread',
         threadRenameAction: 'Rename',
         threadArchiveAction: 'Archive',
-        chatTitle: 'Chat',
-        chatHintTpl: 'Enter to send · Shift+Enter for newline · @{name} optional by default',
-        traceSub: 'Each agent run is grouped as a thinking chain. Stream output chunks are hidden by default; enable below for debugging.',
+        chatTitle: 'Task',
+        chatHintTpl: 'Ask follow-ups or upload files.',
+        traceSub: 'Review step summaries and runtime progress for the current task.',
         groupLabel: 'Group',
         allGroups: 'All',
         reloadTrace: 'Refresh',
@@ -272,8 +356,7 @@ const LANG_KEY = 'bioclaw-web-lang';
         traceContainer: 'Container',
         traceIpcKind: 'Kind',
         traceRawJson: 'Raw JSON',
-        placeholder: 'e.g. Read a FASTA with BioPython and report GC content…',
-        uploadHint: 'Uploads go to the group workspace; the agent can read them by path.',
+        placeholder: 'For example: analyze this dataset and generate a concise report…',
         uploadLabel: 'Upload file',
         noFile: 'No file chosen',
         send: 'Send',
@@ -321,7 +404,20 @@ const LANG_KEY = 'bioclaw-web-lang';
       closeSettingsBtn.setAttribute('aria-label', t.closeSettingsAria);
       document.getElementById('threadsTitle').textContent = t.threadsTitle;
       document.getElementById('threadsHint').textContent = t.threadsHint;
+      if (threadsPanelTitle) threadsPanelTitle.textContent = t.threadsTitle;
       newThreadBtn.textContent = t.newThread;
+      recentFilesTitle.textContent = t.recentFilesTitle;
+      recentFilesHint.textContent = t.recentFilesHint;
+      progressTitle.textContent = t.progressTitle;
+      resultsTitle.textContent = t.resultsTitle;
+      resultsHint.textContent = t.resultsHint;
+      workspaceEyebrowEl.textContent = t.workspaceEyebrow;
+      viewConversationBtn.textContent = t.viewConversation;
+      viewArtifactBtn.textContent = t.viewArtifact;
+      artifactEmptyEl.textContent = t.artifactEmpty;
+      railProject.textContent = t.railProject;
+      railResults.textContent = t.railResults;
+      railStatus.textContent = t.railStatus;
       document.getElementById('secDisplay').textContent = t.secDisplay;
       document.getElementById('secConnection').textContent = t.secConnection;
       document.getElementById('secControl').textContent = t.secControl;
@@ -337,7 +433,6 @@ const LANG_KEY = 'bioclaw-web-lang';
       manageRefreshBtn.textContent = t.manageRefresh;
       manageCommandBtn.textContent = t.manageRunCommand;
       manageCommandInput.placeholder = t.manageCommandPlaceholder;
-      document.getElementById('chatTitle').textContent = t.chatTitle;
       document.getElementById('chatHint').textContent = t.chatHintTpl.replace('{name}', assistantName);
       document.getElementById('traceSub').textContent = t.traceSub;
       document.getElementById('i18n-group-label').textContent = t.groupLabel;
@@ -345,14 +440,17 @@ const LANG_KEY = 'bioclaw-web-lang';
       document.getElementById('reloadTrace').textContent = t.reloadTrace;
       document.getElementById('traceStreamLabel').textContent = t.traceStreamLabel;
       input.placeholder = t.placeholder;
-      document.getElementById('uploadHint').textContent = t.uploadHint;
       document.getElementById('uploadLabel').textContent = t.uploadLabel;
       sendBtn.textContent = t.send;
-      document.getElementById('i18n-sidebar-title').textContent = t.sidebarTitle;
-      document.getElementById('i18n-sidebar-hint').innerHTML = t.sidebarHint;
+      if (threadSectionToggle) threadSectionToggle.title = t.threadsTitle;
+      if (recentFilesSectionToggle) recentFilesSectionToggle.title = t.recentFilesTitle;
       if (composerResizer) {
         composerResizer.setAttribute('aria-label', t.resizeInputAria);
         composerResizer.title = t.resizeInputTitle;
+      }
+      if (artifactStageResizer) {
+        artifactStageResizer.setAttribute('aria-label', t.resizeArtifactAria);
+        artifactStageResizer.title = t.resizeArtifactTitle;
       }
       if (mainPanelResizer) {
         mainPanelResizer.setAttribute('aria-label', t.resizePanelsAria);
@@ -362,17 +460,17 @@ const LANG_KEY = 'bioclaw-web-lang';
         threadRailResizer.setAttribute('aria-label', t.resizeThreadsAria);
         threadRailResizer.title = t.resizeThreadsTitle;
       }
-      if (traceSidebarResizer) {
-        traceSidebarResizer.setAttribute('aria-label', t.resizeTraceAria);
-        traceSidebarResizer.title = t.resizeTraceTitle;
-      }
       var hasFile = fileInput.files && fileInput.files[0];
       fileNameEl.textContent = hasFile ? fileInput.files[0].name : t.noFile;
-      if (!groupSel.value) treeEl.textContent = t.treePick;
       if (manageStatusPanel && !manageStatusPanel.textContent) manageStatusPanel.textContent = t.manageEmpty;
       if (manageDoctorPanel && !manageDoctorPanel.textContent) manageDoctorPanel.textContent = t.manageEmpty;
+      renderWelcomeShell();
       syncThemeUi();
+      syncWorkspaceMode();
       renderThreads();
+      renderArtifactLists();
+      renderArtifactStage();
+      render(currentMessages);
       if (lastConnMode === null) {
         connDot.classList.remove('live', 'poll');
         connLabel.textContent = t.connConnecting;
@@ -393,7 +491,7 @@ const LANG_KEY = 'bioclaw-web-lang';
       try {
         saved = localStorage.getItem(LANG_KEY) || localStorage.getItem('bioclaw-local-web-lang') || localStorage.getItem('bioclaw-dashboard-lang');
       } catch (e) {}
-      applyLang(saved === 'zh' ? 'zh' : 'en');
+      applyLang(saved === 'en' ? 'en' : 'zh');
     })();
 
     function setChatConn(mode) {
@@ -431,7 +529,7 @@ const LANG_KEY = 'bioclaw-web-lang';
         traceConnPill.classList.add('ok');
         traceConnPill.classList.remove('bad');
       };
-      traceEs.onmessage = function () { loadTrace(); loadTree(); };
+      traceEs.onmessage = function () { loadTrace(); };
       traceEs.onerror = function () {
         traceConnLabel.textContent = T().sseBad;
         settingsTraceConnValue.textContent = traceConnLabel.textContent;
@@ -615,6 +713,7 @@ const LANG_KEY = 'bioclaw-web-lang';
         return '<div class="file-action-item">' +
           '<div class="file-action-name">' + esc(name) + '</div>' +
           '<div class="file-actions">' +
+          '<button type="button" class="file-button file-button-accent" data-artifact-url="' + escAttr(p) + '">' + esc(t.previewInStage) + '</button>' +
           '<a class="file-button" href="' + escAttr(p) + '" target="_blank" rel="noreferrer">' + esc(t.openFile) + '</a>' +
           '<a class="file-button" href="' + escAttr(p) + '" download>' + esc(t.downloadFile) + '</a>' +
           '</div></div>';
@@ -925,33 +1024,17 @@ const LANG_KEY = 'bioclaw-web-lang';
       renderList(data.events || []);
     }
 
-    async function loadTree() {
-      var g = groupSel.value;
-      if (!g) { treeEl.textContent = T().treePick; return; }
-      var res = await fetch('/api/workspace/tree?group_folder=' + encodeURIComponent(g), { headers: authHeaders() });
-      if (!res.ok) { treeEl.textContent = T().loadFail; return; }
-      var data = await res.json();
-      function nodeHtml(n) {
-        if (n.type === 'dir') {
-          var inner = (n.children || []).map(nodeHtml).join('');
-          return '<details open><summary>' + esc(n.name) + '/</summary><div>' + inner + '</div></details>';
-        }
-        return '<div>· ' + esc(n.name) + '</div>';
-      }
-      treeEl.innerHTML = (data.tree || []).map(nodeHtml).join('') || T().treeEmpty;
-    }
-
     function ensureTrace() {
       if (traceBooted) { startTraceSse(); return; }
       traceBooted = true;
       loadGroups().then(function () {
+        syncGroupSelectionToActiveThread(true);
         loadTrace();
-        loadTree();
         startTraceSse();
       });
     }
 
-    function isWide() { return window.matchMedia('(min-width: 1100px)').matches; }
+    function isWide() { return window.matchMedia('(min-width: 1400px)').matches; }
 
     function applyLayout() {
       var wide = isWide();
@@ -986,10 +1069,12 @@ const LANG_KEY = 'bioclaw-web-lang';
 
     tabTraceBtn.addEventListener('click', function () { setTab('trace'); });
     tabChatBtn.addEventListener('click', function () { setTab('chat'); });
-    window.matchMedia('(min-width: 1100px)').addEventListener('change', applyLayout);
+    window.matchMedia('(min-width: 1400px)').addEventListener('change', applyLayout);
     window.matchMedia('(min-width: 981px)').addEventListener('change', applyStoredPanelSizes);
-    window.matchMedia('(min-width: 701px)').addEventListener('change', applyStoredPanelSizes);
-    window.addEventListener('resize', applyStoredPanelSizes);
+    window.addEventListener('resize', function () {
+      applyStoredPanelSizes();
+      setArtifactStageHeight(artifactStage.getBoundingClientRect().height || 520, false);
+    });
 
     (function bootTabFromUrl() {
       var p = new URLSearchParams(window.location.search);
@@ -997,8 +1082,8 @@ const LANG_KEY = 'bioclaw-web-lang';
       applyLayout();
     })();
 
-    document.getElementById('reloadTrace').onclick = function () { loadTrace(); loadTree(); };
-    groupSel.onchange = function () { loadTrace(); loadTree(); };
+    document.getElementById('reloadTrace').onclick = function () { loadTrace(); };
+    groupSel.onchange = function () { loadTrace(); };
     if (traceStreamCb) {
       traceStreamCb.checked = traceShowStream;
       traceStreamCb.addEventListener('change', function () {
@@ -1015,7 +1100,7 @@ const LANG_KEY = 'bioclaw-web-lang';
     });
 
     function currentTheme() {
-      return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+      return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
     }
 
     function syncThemeUi() {
@@ -1027,10 +1112,10 @@ const LANG_KEY = 'bioclaw-web-lang';
     }
 
     function setTheme(theme, persist) {
-      if (theme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
       else document.documentElement.removeAttribute('data-theme');
       if (persist) {
-        try { localStorage.setItem(THEME_KEY, theme === 'light' ? 'light' : 'dark'); } catch (e) {}
+        try { localStorage.setItem(THEME_KEY, theme === 'dark' ? 'dark' : 'light'); } catch (e) {}
       }
       syncThemeUi();
     }
@@ -1038,17 +1123,38 @@ const LANG_KEY = 'bioclaw-web-lang';
     function loadTheme() {
       var th = null;
       try { th = localStorage.getItem(THEME_KEY); } catch (e) {}
-      if (!th && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) th = 'light';
-      setTheme(th === 'light' ? 'light' : 'dark', false);
+      if (!th) th = 'light';
+      setTheme(th === 'dark' ? 'dark' : 'light', false);
     }
     loadTheme();
     themeBtn.addEventListener('click', function () {
       setTheme(currentTheme() === 'light' ? 'dark' : 'light', true);
     });
 
+    function readStoredOpenState(key, fallback) {
+      try {
+        var raw = localStorage.getItem(key);
+        if (raw === null) return fallback;
+        return raw !== '0';
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    function syncRailSections() {
+      if (threadSection) threadSection.classList.toggle('is-open', threadSectionOpen);
+      if (threadSectionToggle) threadSectionToggle.setAttribute('aria-expanded', threadSectionOpen ? 'true' : 'false');
+      if (recentFilesSection) recentFilesSection.classList.toggle('is-open', filesSectionOpen);
+      if (recentFilesSectionToggle) recentFilesSectionToggle.setAttribute('aria-expanded', filesSectionOpen ? 'true' : 'false');
+    }
+
+    threadSectionOpen = readStoredOpenState(THREAD_SECTION_OPEN_KEY, true);
+    filesSectionOpen = readStoredOpenState(FILES_SECTION_OPEN_KEY, true);
+    syncRailSections();
+
     function clampComposerHeight(value) {
-      var viewportMax = Math.floor(window.innerHeight * 0.56);
-      return Math.max(104, Math.min(viewportMax, Math.round(value || 0)));
+      var viewportMax = Math.floor(window.innerHeight * 0.48);
+      return Math.max(76, Math.min(viewportMax, Math.round(value || 0)));
     }
 
     function setComposerHeight(value, persist) {
@@ -1062,7 +1168,116 @@ const LANG_KEY = 'bioclaw-web-lang';
     (function loadComposerHeight() {
       var stored = null;
       try { stored = localStorage.getItem(COMPOSER_HEIGHT_KEY); } catch (e) {}
-      setComposerHeight(stored ? Number(stored) : 148, false);
+      var initial = stored ? Number(stored) : 96;
+      if (!isFinite(initial) || initial > 116) initial = 96;
+      setComposerHeight(initial, false);
+    })();
+
+    function compactWorkspaceLabel(value) {
+      var raw = String(value || '').trim();
+      if (!raw) return '';
+      if (raw.length <= 28) return raw;
+      return raw.slice(0, 12) + '…' + raw.slice(-10);
+    }
+
+    function summarizePlainText(text, maxLen) {
+      var raw = String(text || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+        .replace(/[#>*_~-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!raw) return '';
+      return raw.length > maxLen ? raw.slice(0, maxLen - 1) + '…' : raw;
+    }
+
+    function hasWorkspaceConversation(messages) {
+      return (messages || []).some(function (msg) {
+        var text = String((msg && msg.content) || '');
+        if (parseUploadMessage(text)) return false;
+        return summarizePlainText(text, 24).length > 0;
+      });
+    }
+
+    function syncWorkspaceMode() {
+      var hasConversation = hasWorkspaceConversation(currentMessages);
+      if (!hasConversation && !artifacts.length) currentView = 'conversation';
+      var isWelcomeMode = !hasConversation && currentView !== 'artifact';
+      unifiedRoot.classList.toggle('is-welcome-mode', isWelcomeMode);
+      if (welcomeShell) welcomeShell.setAttribute('aria-hidden', isWelcomeMode ? 'false' : 'true');
+      input.placeholder = isWelcomeMode ? T().welcomePlaceholder : T().placeholder;
+      syncViewModeButtons();
+      return isWelcomeMode;
+    }
+
+    function renderWelcomeShell() {
+      if (!welcomeTitleEl || !welcomeSubtitleEl || !welcomeSuggestionsEl) return;
+      var t = T();
+      welcomeTitleEl.textContent = t.welcomeTitleTpl.replace('{name}', assistantName);
+      welcomeSubtitleEl.textContent = t.welcomeSubtitle;
+      var suggestions = Array.isArray(t.welcomeSuggestions) ? t.welcomeSuggestions : [];
+      welcomeSuggestionsEl.innerHTML = suggestions.map(function (item) {
+        return '<button type="button" class="welcome-suggestion" data-prompt="' + escAttr(item) + '">' + esc(item) + '</button>';
+      }).join('');
+    }
+
+    function messageSummaryText(content) {
+      var upload = parseUploadMessage(content);
+      if (upload) return T().messageUploadSummary + ' · ' + upload.filename;
+      var summary = summarizePlainText(content, 96);
+      return summary || T().messageEmptySummary;
+    }
+
+    function artifactGroupLabel(kind) {
+      var t = T();
+      if (kind === 'pdf') return t.artifactGroupPdf;
+      if (kind === 'image') return t.artifactGroupImage;
+      return t.artifactGroupFile;
+    }
+
+    function buildMessageSignature(messages) {
+      return (messages || []).map(function (msg) {
+        return [
+          msg && msg.id ? String(msg.id) : '',
+          msg && msg.timestamp ? String(msg.timestamp) : '',
+          msg && msg.is_from_me ? '1' : '0',
+          String((msg && msg.content) || '').length,
+        ].join(':');
+      }).join('|');
+    }
+
+    function clampArtifactStageHeight(value) {
+      if (!chatMain || !composerCard || !workspaceTopbar || !subtitleEl) {
+        return Math.max(320, Math.min(760, Math.round(value || 520)));
+      }
+      var total = chatMain.getBoundingClientRect().height;
+      var top = workspaceTopbar.getBoundingClientRect().height + subtitleEl.getBoundingClientRect().height;
+      var composer = composerCard.getBoundingClientRect().height;
+      var min = Math.max(320, Math.min(460, Math.floor(total * 0.42)));
+      var max = Math.max(min, total - top - composer - 52);
+      return Math.max(min, Math.min(max, Math.round(value || Math.max(min, 520))));
+    }
+
+    function setArtifactStageHeight(value, persist) {
+      var height = clampArtifactStageHeight(value);
+      unifiedRoot.style.setProperty('--artifact-stage-size', height + 'px');
+      if (persist) {
+        try { localStorage.setItem(ARTIFACT_STAGE_HEIGHT_KEY, String(height)); } catch (e) {}
+      }
+    }
+
+    function resetArtifactStageHeight() {
+      unifiedRoot.style.removeProperty('--artifact-stage-size');
+      try { localStorage.removeItem(ARTIFACT_STAGE_HEIGHT_KEY); } catch (e) {}
+      setArtifactStageHeight(520, false);
+    }
+
+    (function loadArtifactStageHeight() {
+      var stored = null;
+      try { stored = localStorage.getItem(ARTIFACT_STAGE_HEIGHT_KEY); } catch (e) {}
+      setArtifactStageHeight(stored ? Number(stored) : 520, false);
     })();
 
     if (composerResizer) {
@@ -1095,19 +1310,67 @@ const LANG_KEY = 'bioclaw-web-lang';
       composerResizer.addEventListener('pointerup', finishComposerResize);
       composerResizer.addEventListener('pointercancel', finishComposerResize);
       composerResizer.addEventListener('dblclick', function () {
-        setComposerHeight(148, true);
+        setComposerHeight(96, true);
       });
       composerResizer.addEventListener('keydown', function (event) {
         if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Home') return;
         event.preventDefault();
         if (event.key === 'Home') {
-          setComposerHeight(148, true);
+          setComposerHeight(96, true);
           return;
         }
         var delta = event.key === 'ArrowDown' ? 18 : -18;
         setComposerHeight(input.getBoundingClientRect().height + delta, true);
       });
       window.addEventListener('pointerup', finishComposerResize);
+    }
+
+    if (artifactStageResizer) {
+      var stageResizeState = null;
+
+      function finishStageResize(event) {
+        if (!stageResizeState) return;
+        if (event && stageResizeState.pointerId != null && event.pointerId != null && event.pointerId !== stageResizeState.pointerId) return;
+        document.body.classList.remove('is-resizing-composer');
+        setArtifactStageHeight(artifactStage.getBoundingClientRect().height, true);
+        stageResizeState = null;
+      }
+
+      artifactStageResizer.addEventListener('pointerdown', function (event) {
+        if (currentView !== 'artifact') return;
+        event.preventDefault();
+        stageResizeState = {
+          pointerId: event.pointerId,
+          startY: event.clientY,
+          startHeight: artifactStage.getBoundingClientRect().height,
+        };
+        artifactStageResizer.setPointerCapture(event.pointerId);
+        document.body.classList.add('is-resizing-composer');
+      });
+
+      artifactStageResizer.addEventListener('pointermove', function (event) {
+        if (!stageResizeState || event.pointerId !== stageResizeState.pointerId) return;
+        setArtifactStageHeight(stageResizeState.startHeight + (event.clientY - stageResizeState.startY), false);
+      });
+
+      artifactStageResizer.addEventListener('pointerup', finishStageResize);
+      artifactStageResizer.addEventListener('pointercancel', finishStageResize);
+      artifactStageResizer.addEventListener('dblclick', function () {
+        if (currentView !== 'artifact') return;
+        resetArtifactStageHeight();
+      });
+      artifactStageResizer.addEventListener('keydown', function (event) {
+        if (currentView !== 'artifact') return;
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Home') return;
+        event.preventDefault();
+        if (event.key === 'Home') {
+          resetArtifactStageHeight();
+          return;
+        }
+        var delta = event.key === 'ArrowDown' ? 28 : -28;
+        setArtifactStageHeight(artifactStage.getBoundingClientRect().height + delta, true);
+      });
+      window.addEventListener('pointerup', finishStageResize);
     }
 
     function readStoredNumber(key) {
@@ -1131,9 +1394,9 @@ const LANG_KEY = 'bioclaw-web-lang';
 
     function clampMainPanelWidth(value) {
       if (!unifiedLayout) return 0;
-      var total = Math.max(0, unifiedLayout.getBoundingClientRect().width - 12);
-      var min = 360;
-      var max = Math.max(min, total - 360);
+      var total = Math.max(0, unifiedLayout.getBoundingClientRect().width - 84);
+      var min = 320;
+      var max = Math.max(min, total - 560);
       return Math.max(min, Math.min(max, Math.round(value || min)));
     }
 
@@ -1143,14 +1406,6 @@ const LANG_KEY = 'bioclaw-web-lang';
       var min = 188;
       var max = Math.max(min, Math.min(420, total - 360));
       return Math.max(min, Math.min(max, Math.round(value || 244)));
-    }
-
-    function clampTraceSidebarWidth(value) {
-      if (!traceMain) return 280;
-      var total = Math.max(0, traceMain.getBoundingClientRect().width - 12);
-      var min = 220;
-      var max = Math.max(min, Math.min(460, total - 320));
-      return Math.max(min, Math.min(max, Math.round(value || 280)));
     }
 
     function setMainPanelWidth(value, persist) {
@@ -1175,26 +1430,12 @@ const LANG_KEY = 'bioclaw-web-lang';
       clearStoredNumber(THREAD_SPLIT_KEY);
     }
 
-    function setTraceSidebarWidth(value, persist) {
-      var width = clampTraceSidebarWidth(value);
-      unifiedRoot.style.setProperty('--trace-sidebar-w', width + 'px');
-      if (persist) writeStoredNumber(TRACE_SPLIT_KEY, width);
-    }
-
-    function resetTraceSidebarWidth() {
-      unifiedRoot.style.removeProperty('--trace-sidebar-w');
-      clearStoredNumber(TRACE_SPLIT_KEY);
-    }
-
     function applyStoredPanelSizes() {
       var mainWidth = readStoredNumber(MAIN_SPLIT_KEY);
       if (mainWidth != null && isWide()) setMainPanelWidth(mainWidth, false);
 
       var railWidth = readStoredNumber(THREAD_SPLIT_KEY);
       if (railWidth != null && window.matchMedia('(min-width: 981px)').matches) setThreadRailWidth(railWidth, false);
-
-      var traceWidth = readStoredNumber(TRACE_SPLIT_KEY);
-      if (traceWidth != null && window.matchMedia('(min-width: 701px)').matches) setTraceSidebarWidth(traceWidth, false);
     }
 
     function installHorizontalResizer(handle, opts) {
@@ -1249,8 +1490,8 @@ const LANG_KEY = 'bioclaw-web-lang';
     installHorizontalResizer(mainPanelResizer, {
       enabled: function () { return isWide(); },
       current: function () { return panelTrace.getBoundingClientRect().width; },
-      setFromDrag: function (startValue, delta) { setMainPanelWidth(startValue + delta, false); },
-      setFromKeyboard: function (delta) { setMainPanelWidth(panelTrace.getBoundingClientRect().width + delta, true); },
+      setFromDrag: function (startValue, delta) { setMainPanelWidth(startValue - delta, false); },
+      setFromKeyboard: function (delta) { setMainPanelWidth(panelTrace.getBoundingClientRect().width - delta, true); },
       persist: function (value) { setMainPanelWidth(value, true); },
       reset: resetMainPanelWidth,
     });
@@ -1262,15 +1503,6 @@ const LANG_KEY = 'bioclaw-web-lang';
       setFromKeyboard: function (delta) { setThreadRailWidth(threadRail.getBoundingClientRect().width + delta, true); },
       persist: function (value) { setThreadRailWidth(value, true); },
       reset: resetThreadRailWidth,
-    });
-
-    installHorizontalResizer(traceSidebarResizer, {
-      enabled: function () { return window.matchMedia('(min-width: 701px)').matches; },
-      current: function () { return traceSidebar.getBoundingClientRect().width; },
-      setFromDrag: function (startValue, delta) { setTraceSidebarWidth(startValue - delta, false); },
-      setFromKeyboard: function (delta) { setTraceSidebarWidth(traceSidebar.getBoundingClientRect().width - delta, true); },
-      persist: function (value) { setTraceSidebarWidth(value, true); },
-      reset: resetTraceSidebarWidth,
     });
 
     function setSettingsOpen(open) {
@@ -1303,6 +1535,179 @@ const LANG_KEY = 'bioclaw-web-lang';
       }
     }
 
+    function getActiveThread() {
+      return threads.find(function (thread) { return thread.chatJid === chatJid; }) || null;
+    }
+
+    function updateWorkspaceHeader() {
+      var t = T();
+      var active = getActiveThread();
+      var title = active && active.title ? active.title : t.chatTitle;
+      var hint = active && active.workspaceFolder
+        ? compactWorkspaceLabel(active.workspaceFolder)
+        : t.chatHintTpl.replace('{name}', assistantName);
+      document.getElementById('chatTitle').textContent = title;
+      document.getElementById('chatHint').textContent = hint;
+      if (workspaceEyebrowEl) workspaceEyebrowEl.textContent = t.workspaceEyebrow;
+    }
+
+    function syncGroupSelectionToActiveThread(force) {
+      if (!groupSel) return;
+      var active = getActiveThread();
+      var desired = active && active.workspaceFolder ? active.workspaceFolder : '';
+      if (!desired) return;
+      var exists = Array.prototype.some.call(groupSel.options, function (o) { return o.value === desired; });
+      if (!exists) return;
+      if (force || !groupSel.value) groupSel.value = desired;
+    }
+
+    function artifactKind(nameOrUrl) {
+      var value = String(nameOrUrl || '').toLowerCase();
+      if (/\.(png|jpe?g|gif|webp|svg)(?:$|[?#])/.test(value)) return 'image';
+      if (/\.pdf(?:$|[?#])/.test(value)) return 'pdf';
+      return 'file';
+    }
+
+    function collectArtifacts(messages) {
+      var seen = {};
+      var list = [];
+
+      function pushArtifact(url, name, timestamp, source) {
+        if (!url || seen[url]) return;
+        seen[url] = true;
+        list.push({
+          url: url,
+          name: name || (url.split('/').pop() || url),
+          kind: artifactKind(name || url),
+          timestamp: timestamp || '',
+          source: source || 'message',
+        });
+      }
+
+      for (var i = messages.length - 1; i >= 0; i--) {
+        var msg = messages[i];
+        var text = String(msg.content || '');
+        var upload = parseUploadMessage(text);
+        if (upload) pushArtifact(upload.previewUrl, upload.filename, msg.timestamp, 'upload');
+        var files = extractFileLinks(text);
+        for (var f = 0; f < files.length; f++) {
+          pushArtifact(files[f], files[f].split('/').pop() || files[f], msg.timestamp, 'message');
+        }
+      }
+
+      return list;
+    }
+
+    function syncViewModeButtons() {
+      var artifactActive = currentView === 'artifact';
+      unifiedRoot.classList.toggle('view-artifact', artifactActive);
+      if (viewConversationBtn) viewConversationBtn.setAttribute('aria-selected', artifactActive ? 'false' : 'true');
+      if (viewArtifactBtn) viewArtifactBtn.setAttribute('aria-selected', artifactActive ? 'true' : 'false');
+    }
+
+    function renderArtifactLists() {
+      var t = T();
+
+      function renderItem(artifact, compact) {
+        var active = selectedArtifact && selectedArtifact.url === artifact.url ? ' is-active' : '';
+        var meta = artifact.timestamp ? esc(formatThreadTime(artifact.timestamp)) : '';
+        return '<button type="button" class="artifact-item' + active + '" data-artifact-url="' + escAttr(artifact.url) + '">' +
+          '<span class="artifact-item-main">' +
+          '<span class="artifact-item-name">' + esc(artifact.name) + '</span>' +
+          (compact ? '' : '<span class="artifact-item-meta">' + meta + '</span>') +
+          '</span>' +
+          '<span class="artifact-item-kind">' + esc(artifact.kind.toUpperCase()) + '</span>' +
+          '</button>';
+      }
+
+      function renderItems(list, emptyText, compact) {
+        if (!list || !list.length) return '<div class="artifact-list-empty">' + esc(emptyText) + '</div>';
+        return list.map(function (artifact) { return renderItem(artifact, compact); }).join('');
+      }
+
+      function renderGroups(list) {
+        if (!list || !list.length) return '<div class="artifact-list-empty">' + esc(t.resultsEmpty) + '</div>';
+        var order = ['pdf', 'image', 'file'];
+        return order.map(function (kind) {
+          var items = list.filter(function (artifact) { return artifact.kind === kind; });
+          if (!items.length) return '';
+          var open = artifactGroupOpen[kind] !== false ? ' open' : '';
+          return '<details class="artifact-group" data-kind="' + escAttr(kind) + '"' + open + '>' +
+            '<summary><span class="artifact-group-title">' + esc(artifactGroupLabel(kind)) + '</span>' +
+            '<span class="artifact-group-meta">' + esc(String(items.length)) + '</span></summary>' +
+            '<div class="artifact-group-body">' + items.map(function (artifact) { return renderItem(artifact, false); }).join('') + '</div>' +
+            '</details>';
+        }).join('');
+      }
+
+      if (recentFileListEl) recentFileListEl.innerHTML = renderItems(artifacts.slice(0, 4), t.recentFilesEmpty, true);
+      if (resultListEl) resultListEl.innerHTML = renderGroups(artifacts);
+    }
+
+    function renderArtifactStage() {
+      var t = T();
+      if (!artifactStage || !artifactPreviewEl || !artifactEmptyEl) return;
+      syncViewModeButtons();
+      if (currentView !== 'artifact') {
+        artifactStage.classList.remove('is-active');
+        artifactPreviewEl.innerHTML = '';
+        artifactEmptyEl.classList.remove('is-hidden');
+        artifactEmptyEl.textContent = t.artifactEmpty;
+        return;
+      }
+      artifactStage.classList.add('is-active');
+      if (!selectedArtifact && artifacts.length) selectedArtifact = artifacts[0];
+      if (!selectedArtifact) {
+        artifactPreviewEl.innerHTML = '';
+        artifactEmptyEl.classList.remove('is-hidden');
+        artifactEmptyEl.textContent = t.artifactEmpty;
+        return;
+      }
+
+      artifactEmptyEl.classList.add('is-hidden');
+      artifactEmptyEl.textContent = '';
+      if (selectedArtifact.kind === 'image') {
+        artifactPreviewEl.innerHTML = '<div class="artifact-frame artifact-frame-image"><img src="' + escAttr(selectedArtifact.url) + '" alt="' + escAttr(selectedArtifact.name) + '"></div>';
+        return;
+      }
+      if (selectedArtifact.kind === 'pdf') {
+        artifactPreviewEl.innerHTML = '<div class="artifact-frame artifact-frame-pdf"><iframe src="' + escAttr(selectedArtifact.url) + '" title="' + escAttr(selectedArtifact.name) + '"></iframe></div>';
+        return;
+      }
+      artifactPreviewEl.innerHTML =
+        '<div class="artifact-generic-card">' +
+        '<div class="artifact-generic-title">' + esc(selectedArtifact.name) + '</div>' +
+        '<div class="file-actions">' +
+        '<a class="file-button" href="' + escAttr(selectedArtifact.url) + '" target="_blank" rel="noreferrer">' + esc(t.openFile) + '</a>' +
+        '<a class="file-button" href="' + escAttr(selectedArtifact.url) + '" download>' + esc(t.downloadFile) + '</a>' +
+        '</div>' +
+        '</div>';
+    }
+
+    function setViewMode(mode) {
+      var nextView = mode === 'artifact' ? 'artifact' : 'conversation';
+      if (currentView !== 'artifact' && nextView === 'artifact') {
+        preArtifactComposerHeight = input.getBoundingClientRect().height;
+        if (preArtifactComposerHeight > 88) setComposerHeight(74, false);
+      } else if (currentView === 'artifact' && nextView !== 'artifact' && preArtifactComposerHeight) {
+        setComposerHeight(preArtifactComposerHeight, false);
+      }
+      currentView = nextView;
+      syncWorkspaceMode();
+      renderArtifactLists();
+      renderArtifactStage();
+    }
+
+    function selectArtifact(url) {
+      if (!url) return;
+      selectedArtifact = artifacts.find(function (artifact) { return artifact.url === url; }) || {
+        url: url,
+        name: url.split('/').pop() || url,
+        kind: artifactKind(url),
+      };
+      setViewMode('artifact');
+    }
+
     function stopChatSse() {
       if (chatEs) {
         chatEs.close();
@@ -1313,6 +1718,7 @@ const LANG_KEY = 'bioclaw-web-lang';
     function renderThreads() {
       if (!threadListEl) return;
       var t = T();
+      updateWorkspaceHeader();
       if (!threads.length) {
         threadListEl.innerHTML = '<div class="thread-empty">' + esc(t.threadEmpty) + '</div>';
         return;
@@ -1321,11 +1727,15 @@ const LANG_KEY = 'bioclaw-web-lang';
         var active = thread.chatJid === chatJid ? ' is-active' : '';
         var title = thread.title || t.threadUntitled;
         var metaTime = formatThreadTime(thread.lastActivity || thread.addedAt);
+        var workspaceLabel = compactWorkspaceLabel(thread.workspaceFolder || '');
+        var meta = workspaceLabel
+          ? ('<span title="' + escAttr(thread.workspaceFolder || '') + '">' + esc(workspaceLabel) + '</span><span>' + esc(metaTime) + '</span>')
+          : ('<span></span><span>' + esc(metaTime) + '</span>');
         return '<div class="thread-item' + active + '" data-chat-jid="' + esc(thread.chatJid) + '" role="button" tabindex="0">' +
           '<div class="thread-item-row">' +
           '<div class="thread-item-main">' +
           '<div class="thread-item-title">' + esc(title) + '</div>' +
-          '<div class="thread-item-meta"><span>' + esc(thread.workspaceFolder || '') + '</span><span>' + esc(metaTime) + '</span></div>' +
+          '<div class="thread-item-meta">' + meta + '</div>' +
           '</div>' +
           '<div class="thread-item-actions">' +
           '<button type="button" class="thread-action" data-thread-action="rename" data-chat-jid="' + esc(thread.chatJid) + '" title="' + esc(t.threadRenameAction) + '">✎</button>' +
@@ -1342,10 +1752,11 @@ const LANG_KEY = 'bioclaw-web-lang';
         if (!res.ok) return;
         var data = await res.json();
         threads = Array.isArray(data.threads) ? data.threads : [];
-        if (!threads.some(function (thread) { return thread.chatJid === chatJid; }) && threads[0]) {
+        if (!threads.some(function (thread) { return thread.chatJid === chatJid; }) && chatJid !== DEFAULT_CHAT_JID && threads[0]) {
           chatJid = threads[0].chatJid;
         }
         if (jidEl) jidEl.textContent = chatJid;
+        syncGroupSelectionToActiveThread(true);
         renderThreads();
       } catch (e) {}
     }
@@ -1358,9 +1769,11 @@ const LANG_KEY = 'bioclaw-web-lang';
       if (jidEl) jidEl.textContent = chatJid;
       try { localStorage.setItem(THREAD_KEY, chatJid); } catch (e) {}
       renderThreads();
+      syncGroupSelectionToActiveThread(true);
       stopPolling();
       stopChatSse();
       await refreshMessages();
+      loadTrace();
       await refreshManagementPanels();
       connectChatSse();
     }
@@ -1408,7 +1821,7 @@ const LANG_KEY = 'bioclaw-web-lang';
     }
 
     function render(messages) {
-      var signature = JSON.stringify(messages.map(function (m) { return [m.id, m.timestamp, m.content]; }));
+      var signature = buildMessageSignature(messages);
       if (signature === lastSignature) return;
       lastSignature = signature;
       var t = T();
@@ -1454,7 +1867,8 @@ const LANG_KEY = 'bioclaw-web-lang';
       var isImage = /\.(png|jpe?g|gif|webp|svg)$/i.test(file.filename);
       var preview = isImage ? '<img class="preview" src="' + escapedPreview + '" alt="' + escapedName + '">' : '';
       return '<section class="file-card"><div class="file-title">' + esc(t.uploadedPrefix) + escapedName + '</div><div class="file-path">' + escapedPath + '</div>' + preview +
-        '<div class="file-actions"><a class="file-button" href="' + escapedPreview + '" target="_blank" rel="noreferrer">' + esc(t.openFile) + '</a>' +
+        '<div class="file-actions"><button type="button" class="file-button file-button-accent" data-artifact-url="' + escapedPreview + '">' + esc(t.previewInStage) + '</button>' +
+        '<a class="file-button" href="' + escapedPreview + '" target="_blank" rel="noreferrer">' + esc(t.openFile) + '</a>' +
         '<a class="file-button" href="' + escapedPreview + '" download>' + esc(t.download) + '</a></div></section>';
     }
 
@@ -1463,12 +1877,26 @@ const LANG_KEY = 'bioclaw-web-lang';
         var res = await fetch('/api/messages?scope=chat&chatJid=' + encodeURIComponent(chatJid));
         if (!res.ok) return;
         var data = await res.json();
-        render(data.messages || []);
+        currentMessages = data.messages || [];
+        artifacts = collectArtifacts(currentMessages);
+        if (selectedArtifact && !artifacts.some(function (artifact) { return artifact.url === selectedArtifact.url; })) {
+          selectedArtifact = artifacts[0] || null;
+        }
+        syncWorkspaceMode();
+        renderArtifactLists();
+        renderArtifactStage();
+        render(currentMessages);
       } catch (e) {}
     }
 
     if (messagesEl) {
       messagesEl.addEventListener('click', async function (event) {
+        var artifactTrigger = event.target && event.target.closest ? event.target.closest('[data-artifact-url]') : null;
+        if (artifactTrigger) {
+          event.preventDefault();
+          selectArtifact(artifactTrigger.getAttribute('data-artifact-url'));
+          return;
+        }
         var btn = event.target && event.target.closest ? event.target.closest('.copy-btn') : null;
         if (!btn) return;
         event.preventDefault();
@@ -1484,6 +1912,58 @@ const LANG_KEY = 'bioclaw-web-lang';
           btn.textContent = t.copyFail;
           setTimeout(function () { btn.textContent = t.copy; }, 1200);
         }
+      });
+    }
+
+    function bindArtifactListClicks(container) {
+      if (!container) return;
+      container.addEventListener('click', function (event) {
+        var button = event.target && event.target.closest ? event.target.closest('[data-artifact-url]') : null;
+        if (!button) return;
+        event.preventDefault();
+        selectArtifact(button.getAttribute('data-artifact-url'));
+      });
+    }
+
+    bindArtifactListClicks(recentFileListEl);
+    bindArtifactListClicks(resultListEl);
+
+    if (resultListEl) {
+      resultListEl.addEventListener('toggle', function (event) {
+        var details = event.target;
+        if (!details || !details.classList || !details.classList.contains('artifact-group')) return;
+        artifactGroupOpen[details.getAttribute('data-kind') || 'file'] = details.open;
+      }, true);
+    }
+
+    if (welcomeSuggestionsEl) {
+      welcomeSuggestionsEl.addEventListener('click', function (event) {
+        var button = event.target && event.target.closest ? event.target.closest('[data-prompt]') : null;
+        if (!button) return;
+        event.preventDefault();
+        input.value = button.getAttribute('data-prompt') || '';
+        input.focus();
+      });
+    }
+
+    if (viewConversationBtn) {
+      viewConversationBtn.addEventListener('click', function () { setViewMode('conversation'); });
+    }
+    if (viewArtifactBtn) {
+      viewArtifactBtn.addEventListener('click', function () { setViewMode('artifact'); });
+    }
+    if (threadSectionToggle) {
+      threadSectionToggle.addEventListener('click', function () {
+        threadSectionOpen = !threadSectionOpen;
+        try { localStorage.setItem(THREAD_SECTION_OPEN_KEY, threadSectionOpen ? '1' : '0'); } catch (e) {}
+        syncRailSections();
+      });
+    }
+    if (recentFilesSectionToggle) {
+      recentFilesSectionToggle.addEventListener('click', function () {
+        filesSectionOpen = !filesSectionOpen;
+        try { localStorage.setItem(FILES_SECTION_OPEN_KEY, filesSectionOpen ? '1' : '0'); } catch (e) {}
+        syncRailSections();
       });
     }
 
@@ -1637,13 +2117,6 @@ const LANG_KEY = 'bioclaw-web-lang';
     (async function initThreadsAndChat() {
       try {
         await refreshThreads();
-        var savedThread = null;
-        try { savedThread = localStorage.getItem(THREAD_KEY); } catch (e) {}
-        if (savedThread && threads.some(function (thread) { return thread.chatJid === savedThread; })) {
-          chatJid = savedThread;
-        } else if (threads.length > 0) {
-          chatJid = threads[0].chatJid;
-        }
         if (jidEl) jidEl.textContent = chatJid;
         renderThreads();
       } catch (e) {}

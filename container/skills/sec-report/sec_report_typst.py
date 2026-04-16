@@ -23,6 +23,7 @@ _skill_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_skill_root / "report-template"))
 
 from report_builder import ReportBuilder, T
+from sec_report_common import select_representative_constructs
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -137,6 +138,77 @@ def _recommend(r) -> str:
     return "Low priority"
 
 
+def _editorial_classification(r) -> str:
+    """Short, decision-oriented labels for compact summary tables."""
+    d = r.dominant_species
+    q = r.quality_score
+    agg = r.aggregation_pct if r.has_aggregation else 0.0
+
+    if d in ("large_oligomer", "oligomer"):
+        if q >= 7 and agg <= 5:
+            return "HMW lead"
+        if q >= 5 and agg <= 10:
+            return "HMW follow-up"
+        return "Mixed HMW"
+    if d in ("dimer", "monomer"):
+        if q >= 7:
+            return "Best control"
+        return "Mostly small species"
+    if d == "small_molecule":
+        return "Late elution"
+    if d == "aggregate" or agg >= 15:
+        return "Aggregation"
+    if d == "none":
+        return "No signal"
+    return "Mixed profile"
+
+
+def _executive_takeaways(primary_sr: list, context_results: list, top_cands: list) -> List[str]:
+    lines: List[str] = []
+    if primary_sr:
+        years = sorted({str(r.cohort_year) for r in primary_sr if getattr(r, "cohort_year", None)})
+        year_label = years[0] if len(years) == 1 else ", ".join(years)
+        context_note = (
+            f"; {len(context_results)} earlier run(s) kept as context only"
+            if context_results else ""
+        )
+        lines.append(
+            f"Primary analysis focuses on {len(primary_sr)} construct(s) from {year_label}{context_note}."
+        )
+
+    controls = [
+        r for r in primary_sr
+        if r.quality_score >= 7 and r.dominant_species in ("dimer", "monomer")
+    ]
+    if controls:
+        names = ", ".join(_short(r.name, 24) for r in controls[:2])
+        lines.append(f"Best-behaved controls are {names}.")
+
+    hmw_followup = [
+        r for r in primary_sr
+        if r.dominant_species in ("large_oligomer", "oligomer") and r.quality_score >= 5
+    ]
+    if top_cands:
+        names = ", ".join(_short(r.name, 24) for r in top_cands[:3])
+        lines.append(f"High-confidence HMW lead(s): {names}.")
+    elif hmw_followup:
+        lines.append(
+            f"HMW-dominant traces appear in {len(hmw_followup)} construct(s), "
+            "but none is yet clean enough to call a high-confidence ring lead."
+        )
+
+    agg_context = sum(
+        1 for r in context_results
+        if r.dominant_species == "aggregate" or (r.has_aggregation and r.aggregation_pct >= 15)
+    )
+    if agg_context:
+        lines.append(
+            "Most historical-context runs are aggregation-prone and should not drive the "
+            "current follow-up decisions."
+        )
+    return lines
+
+
 # ── Report Builder ───────────────────────────────────────────────────────────
 
 def build_typst_report(
@@ -145,8 +217,18 @@ def build_typst_report(
     figs_dir: str,
     output_path: str,
     void_volume: float = 8.0,
+    report_profile: str = "full",
 ) -> str:
     sr = sorted(results, key=lambda r: r.quality_score, reverse=True)
+    compact_mode = report_profile == "compact"
+    primary_sr = [r for r in sr if r.cohort == "primary"] if compact_mode else sr
+    analysis_sr = primary_sr or sr
+    context_results = sorted(
+        [r for r in sr if getattr(r, "cohort", "primary") == "context"],
+        key=lambda r: r.quality_score,
+        reverse=True,
+    ) if compact_mode else []
+    highlight_results = select_representative_constructs(analysis_sr, max_items=4) if compact_mode else sr
     n = len(results)
     date_str = datetime.now().strftime("%B %Y")
 
@@ -160,15 +242,38 @@ def build_typst_report(
     )
     report.set_image_dir(Path(figs_dir).parent)
 
+    top_cands = [r for r in analysis_sr if r.quality_score >= 7
+                 and r.dominant_species in ("large_oligomer", "oligomer")]
+    hmw_followup = [r for r in analysis_sr if r.quality_score >= 5
+                    and r.dominant_species in ("large_oligomer", "oligomer")]
+
     # ── Title page metadata ──
     report.vspace("8pt")
-    report.metadata_block([
-        ("Constructs analysed", str(n)),
-        ("Detection", "UV 280 nm"),
-        ("Column", f"Superdex 200 Increase 10/300 GL (V0 ~ {void_volume:.1f} mL)"),
-        ("Report generated", datetime.now().strftime("%Y-%m-%d")),
-        ("Analysis", "Automated (Python / SciPy / Typst)"),
-    ])
+    if compact_mode:
+        report.metadata_block([
+            ("Primary cohort", str(len(analysis_sr))),
+            ("Context runs", str(len(context_results))),
+            ("Detection", "UV 280 nm"),
+            ("Column", f"Superdex 200 Increase 10/300 GL (V0 ~ {void_volume:.1f} mL)"),
+            ("Report generated", datetime.now().strftime("%Y-%m-%d")),
+            ("Analysis", "Automated (Python / SciPy / Typst)"),
+        ])
+        takeaways = _executive_takeaways(analysis_sr, context_results, top_cands)
+        if takeaways:
+            report.callout(
+                T.list(takeaways),
+                title="Executive Summary",
+                kind="success" if top_cands else "note",
+            )
+    else:
+        report.metadata_block([
+            ("Constructs analysed", str(n)),
+            ("Detection", "UV 280 nm"),
+            ("Column", f"Superdex 200 Increase 10/300 GL (V0 ~ {void_volume:.1f} mL)"),
+            ("Report generated", datetime.now().strftime("%Y-%m-%d")),
+            ("Report profile", report_profile),
+            ("Analysis", "Automated (Python / SciPy / Typst)"),
+        ])
 
     # ═══════════════════════════════════════════════════════════════════════
     # 1. BACKGROUND
@@ -239,80 +344,164 @@ def build_typst_report(
     report.heading(1, "3. Results")
 
     # 3.1 Overview metrics
-    top_cands = [r for r in sr if r.quality_score >= 7
-                 and r.dominant_species in ("large_oligomer", "oligomer")]
-    avg_q = sum(r.quality_score for r in results) / n if n else 0
+    avg_q = sum(r.quality_score for r in analysis_sr) / len(analysis_sr) if analysis_sr else 0
 
     report.heading(2, "3.1 Overview")
-    report.metric_cards([
-        {"label": "Constructs", "value": str(n)},
-        {"label": "Ring Candidates", "value": str(len(top_cands))},
-        {"label": "Best Quality", "value": f"{sr[0].quality_score:.1f}" if sr else "N/A"},
-        {"label": "Avg Quality", "value": f"{avg_q:.1f}"},
-    ])
+    if compact_mode:
+        report.metric_cards([
+            {"label": "Primary Cohort", "value": str(len(analysis_sr))},
+            {"label": "Context Runs", "value": str(len(context_results))},
+            {"label": "HMW Follow-up", "value": str(len(hmw_followup))},
+            {"label": "Best Quality", "value": f"{analysis_sr[0].quality_score:.1f}" if analysis_sr else "N/A"},
+        ])
+    else:
+        report.metric_cards([
+            {"label": "Constructs", "value": str(n)},
+            {"label": "Ring Candidates", "value": str(len(top_cands))},
+            {"label": "Best Quality", "value": f"{sr[0].quality_score:.1f}" if sr else "N/A"},
+            {"label": "Avg Quality", "value": f"{avg_q:.1f}"},
+        ])
     report.vspace("8pt")
 
-    # 3.2 Summary table — compact
+    # 3.2 Summary table — primary cohort in compact mode
     report.heading(2, "3.2 Construct Summary Table")
+    table_sr = analysis_sr if compact_mode else sr
+    if compact_mode and len(table_sr) < len(sr):
+        report.text(
+            f"Primary cohort: {len(table_sr)} constructs. "
+            f"{len(sr) - len(table_sr)} historical-context constructs "
+            f"are summarized separately below."
+        )
     summary_rows = []
-    for r in sr:
+    for r in table_sr:
         zone = ZONE_MAP.get(r.dominant_species, r.dominant_species)
         dom = max(r.peaks, key=lambda p: p.relative_area_pct, default=None)
         peak_ml = f"{dom.elution_volume:.1f}" if dom else "N/A"
         dom_frac = f"{dom.relative_area_pct:.0f}%" if dom else "N/A"
         agg = f"{r.aggregation_pct:.0f}%" if r.has_aggregation else "0%"
         summary_rows.append([
-            _short(r.name), peak_ml, zone, dom_frac, agg, _q_label(r.quality_score),
+            _short(r.name, 22 if compact_mode else 26),
+            peak_ml, zone, dom_frac, agg, _editorial_classification(r),
         ])
     report.table(
         ["Construct", "Dom. Peak (mL)", "Dom. Zone", "Dom. Frac.", "Void Frac.", "Classification"],
         summary_rows,
-        caption="Summary of all constructs ranked by quality score.",
+        caption="Primary-cohort constructs ranked for follow-up decisions." if compact_mode
+                else "Summary of all constructs ranked by quality score.",
     )
 
     # 3.3 Figures — overlay, zone fractions, ranking
     overlay = os.path.join(figs_dir, "comparison_overlay.png")
     zone_frac = os.path.join(figs_dir, "zone_fractions.png")
     ranking = os.path.join(figs_dir, "ranking_summary.png")
+    selected_grid = os.path.join(figs_dir, "selected_grid.png")
+
+    overlay_rel = "figures/comparison_overlay.png"
+    zone_rel = "figures/zone_fractions.png"
+    ranking_rel = "figures/ranking_summary.png"
+    if compact_mode:
+        overlay_primary = os.path.join(figs_dir, "comparison_overlay_primary.png")
+        zone_primary = os.path.join(figs_dir, "zone_fractions_primary.png")
+        ranking_primary = os.path.join(figs_dir, "ranking_summary_primary.png")
+        if os.path.exists(overlay_primary):
+            overlay = overlay_primary
+            overlay_rel = "figures/comparison_overlay_primary.png"
+        if os.path.exists(zone_primary):
+            zone_frac = zone_primary
+            zone_rel = "figures/zone_fractions_primary.png"
+        if os.path.exists(ranking_primary):
+            ranking = ranking_primary
+            ranking_rel = "figures/ranking_summary_primary.png"
 
     if os.path.exists(overlay):
         report.heading(2, "3.3 SEC Overlay Comparison")
-        report.image("figures/comparison_overlay.png",
-                     caption=f"All {n} constructs overlaid vs. elution zones "
-                             f"(normalized, aligned to injection point).",
+        report.image(overlay_rel,
+                     caption=(
+                         f"Primary cohort overlay ({len(analysis_sr)} constructs), "
+                         "normalized and aligned to the injection point."
+                     ) if compact_mode else
+                     f"All {n} constructs overlaid vs. elution zones "
+                     f"(normalized, aligned to injection point).",
                      width="100%")
 
     if os.path.exists(zone_frac):
         report.heading(2, "3.4 Zone Fraction Analysis")
-        report.image("figures/zone_fractions.png",
-                     caption="Fraction of total peak area in each elution "
-                             "zone per construct, sorted by dominant peak position.",
+        report.image(zone_rel,
+                     caption=(
+                         "Primary-cohort zone fractions, sorted by dominant peak position."
+                     ) if compact_mode else
+                     "Fraction of total peak area in each elution "
+                     "zone per construct, sorted by dominant peak position.",
                      width="100%")
 
     if os.path.exists(ranking):
         report.heading(2, "3.5 Quality Ranking")
-        report.image("figures/ranking_summary.png",
-                     caption="Constructs ranked by SEC profile quality score (0--10).",
+        report.image(ranking_rel,
+                     caption=(
+                         "Primary-cohort constructs ranked by SEC profile quality score (0--10)."
+                     ) if compact_mode else
+                     "Constructs ranked by SEC profile quality score (0--10).",
                      width="95%")
 
     # 3.6 Individual chromatograms grid
     grid_path = os.path.join(figs_dir, "individual_grid.png")
-    if os.path.exists(grid_path):
+    if os.path.exists(grid_path) and not compact_mode:
         report.heading(2, "3.6 Individual Chromatograms")
         report.image("figures/individual_grid.png",
                      caption=f"Individual SEC chromatograms for all {n} constructs. "
                              "Elution zones are shaded; dashed line marks dominant peak.",
                      width="100%")
 
-    # 3.7 Per-construct highlights — COMPACT, text-focused (Biomni style)
-    report.heading(2, "3.7 Per-Construct Highlights")
+    if compact_mode:
+        if os.path.exists(selected_grid):
+            report.heading(2, "3.6 Representative Chromatograms")
+            report.image(
+                "figures/selected_grid.png",
+                caption=(
+                    "Representative primary-cohort chromatograms spanning clean controls, "
+                    "HMW-leading traces, heterogeneous profiles, and late-eluting failures."
+                ),
+                width="100%",
+            )
+        report.heading(2, "3.7 Selected Construct Highlights")
+        report.text(
+            f"This compact report highlights {len(highlight_results)} representative "
+            f"constructs out of {n} total. Complete per-construct chromatograms remain "
+            f"available in supporting outputs."
+        )
+    else:
+        report.heading(2, "3.7 Per-Construct Highlights")
 
-    for r in sr:
+    for r in highlight_results:
         quality = _q_label(r.quality_score)
         star = " \\*" if r.quality_score >= 7 else ""
         report.heading(3, f"{_short(r.name, 32)} -- {quality}{star}")
         report.text(_interpret(r))
         report.text(f"*Recommendation:* {_recommend(r)}")
+
+    # ── Historical context (compact mode) ─────────────────────────────────
+    if compact_mode:
+        if context_results:
+            years = sorted({str(r.cohort_year) for r in context_results if r.cohort_year})
+            report.heading(2, "3.8 Historical Context")
+            report.text(
+                f"{len(context_results)} constructs from earlier experiment(s) "
+                f"({', '.join(years)}) are included for reference only and are "
+                f"not part of the current primary analysis."
+            )
+            ctx_rows = []
+            for r in context_results:
+                zone = ZONE_MAP.get(r.dominant_species, r.dominant_species)
+                dom = max(r.peaks, key=lambda p: p.relative_area_pct, default=None)
+                peak_ml = f"{dom.elution_volume:.1f}" if dom else "N/A"
+                ctx_rows.append([
+                    _short(r.name), peak_ml, zone, _q_label(r.quality_score),
+                ])
+            report.table(
+                ["Construct", "Dom. Peak (mL)", "Dom. Zone", "Classification"],
+                ctx_rows,
+                caption="Historical context constructs (not part of primary analysis).",
+            )
 
     # ═══════════════════════════════════════════════════════════════════════
     # 4. DISCUSSION
@@ -320,11 +509,10 @@ def build_typst_report(
     report.heading(1, "4. Discussion")
 
     # 4.1 Ring candidates
-    rings = [r for r in sr if r.dominant_species in ("large_oligomer", "oligomer")
+    rings = [r for r in analysis_sr if r.dominant_species in ("large_oligomer", "oligomer")
              and r.quality_score >= 5]
     if rings:
         report.heading(2, "4.1 Ring Assembly Candidates")
-        best = rings[0]
         names = ", ".join(r.name for r in rings)
         report.text(
             f"The clearest ring assembly candidates are {names}. "
@@ -346,7 +534,7 @@ def build_typst_report(
             )
 
     # 4.2 Monodisperse constructs
-    mono = [r for r in sr if r.homogeneity in ("monodisperse", "predominantly_monodisperse")
+    mono = [r for r in analysis_sr if r.homogeneity in ("monodisperse", "predominantly_monodisperse")
             and r.quality_score >= 7]
     if mono:
         report.heading(2, "4.2 Monodisperse Assemblies")
@@ -360,7 +548,7 @@ def build_typst_report(
         )
 
     # 4.3 Heterogeneous HMW
-    hetero = [r for r in sr if r.dominant_species in ("large_oligomer", "oligomer")
+    hetero = [r for r in analysis_sr if r.dominant_species in ("large_oligomer", "oligomer")
               and r.homogeneity == "polydisperse"]
     if hetero:
         report.heading(2, "4.3 Heterogeneous HMW Assemblies")
@@ -376,7 +564,7 @@ def build_typst_report(
         )
 
     # 4.4 Aggregation issues
-    agg_bad = [r for r in sr if r.has_aggregation and r.aggregation_pct > 15]
+    agg_bad = [r for r in analysis_sr if r.has_aggregation and r.aggregation_pct > 15]
     if agg_bad:
         report.heading(2, "4.4 Aggregation Concerns")
         for r in agg_bad:
@@ -400,8 +588,9 @@ def build_typst_report(
     report.heading(1, "5. Conclusions and Recommendations")
 
     report.heading(2, "5.1 Ranked Construct Summary")
+    rank_sr = analysis_sr if compact_mode else sr
     rank_rows = []
-    for i, r in enumerate(sr):
+    for i, r in enumerate(rank_sr):
         rank_rows.append([
             str(i + 1), _short(r.name),
             ZONE_MAP.get(r.dominant_species, r.dominant_species),
@@ -425,8 +614,17 @@ def build_typst_report(
             "- Native mass spectrometry -- determine exact stoichiometry of the ring",
             title="Priority Actions", kind="success",
         )
+    elif hmw_followup:
+        names = ", ".join(r.name for r in hmw_followup[:4])
+        report.callout(
+            f"*For HMW-follow-up constructs ({names}):*\n"
+            "- Repeat SEC on a fresh preparation to confirm whether the HMW profile is reproducible\n"
+            "- SEC-MALS on the HMW fraction to distinguish discrete assemblies from broad oligomer mixtures\n"
+            "- Native PAGE or DLS as a fast orthogonal check before higher-cost structural work",
+            title="HMW Follow-up", kind="warning",
+        )
 
-    mono_good = [r for r in sr if r.dominant_species in ("dimer", "monomer")
+    mono_good = [r for r in analysis_sr if r.dominant_species in ("dimer", "monomer")
                  and r.quality_score >= 7]
     if mono_good:
         names = ", ".join(r.name for r in mono_good[:3])
@@ -456,5 +654,87 @@ def build_typst_report(
     )
 
     # ── Compile ──
+    pdf_path = report.compile(output_path)
+    return str(pdf_path)
+
+
+# ── Appendix Builder ──────────────────────────────────────────────────────────
+
+def build_typst_appendix(
+    results: list,
+    image_files: list,
+    figs_dir: str,
+    output_path: str,
+    void_volume: float = 8.0,
+) -> str:
+    """Generate a supporting-material appendix with all per-construct detail."""
+    sr = sorted(results, key=lambda r: r.quality_score, reverse=True)
+    n = len(results)
+    date_str = datetime.now().strftime("%B %Y")
+
+    report = ReportBuilder(
+        title="SEC Analysis — Supporting Material",
+        subtitle="Per-Construct Chromatograms and Peak Tables",
+        author="BioClaw",
+        date=date_str,
+        project="Appendix to SEC Analysis Report",
+        header_left="SEC Supporting Material",
+    )
+    report.set_image_dir(Path(figs_dir).parent)
+
+    # ── Grid overview ─────────────────────────────────────────────────────
+    grid_path = os.path.join(figs_dir, "individual_grid.png")
+    if os.path.exists(grid_path):
+        report.heading(1, "A. Individual Chromatogram Grid")
+        report.image("figures/individual_grid.png",
+                     caption=f"Individual SEC chromatograms for all {n} constructs. "
+                             "Elution zones shaded; dashed line marks dominant peak.",
+                     width="100%")
+
+    zone_frac = os.path.join(figs_dir, "zone_fractions.png")
+    if os.path.exists(zone_frac):
+        report.heading(1, "B. Zone Fraction Analysis")
+        report.image("figures/zone_fractions.png",
+                     caption="Fraction of total peak area in each elution zone.",
+                     width="100%")
+
+    # ── Per-construct detail ──────────────────────────────────────────────
+    report.heading(1, "C. Per-Construct Analysis")
+    for r in sr:
+        report.heading(2, r.name)
+
+        if r.peaks:
+            peak_rows = []
+            for p in r.peaks:
+                zone = ZONE_MAP.get(p.classification, p.classification)
+                peak_rows.append([
+                    str(p.peak_number),
+                    f"{p.elution_volume:.2f}",
+                    f"{p.height:.1f}",
+                    f"{p.fwhm:.2f}" if p.fwhm else "N/A",
+                    f"{p.relative_area_pct:.1f}%",
+                    zone,
+                ])
+            report.table(
+                ["#", "Ve (mL)", "Height (mAU)", "FWHM (mL)", "Area %", "Zone"],
+                peak_rows,
+            )
+
+        report.text(_interpret(r))
+        report.text(f"*Recommendation:* {_recommend(r)}")
+
+        if r.figure_path and os.path.exists(r.figure_path):
+            rel = os.path.relpath(r.figure_path, Path(figs_dir).parent)
+            report.image(rel,
+                         caption=f"Annotated SEC chromatogram — {r.name}.",
+                         width="90%")
+
+    report.vspace("12pt")
+    report.callout(
+        "This appendix contains all per-construct data. "
+        "See the main report for summary, discussion, and recommendations.",
+        title="Note", kind="note",
+    )
+
     pdf_path = report.compile(output_path)
     return str(pdf_path)
