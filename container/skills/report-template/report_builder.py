@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -227,12 +228,11 @@ class ReportBuilder:
     def compile(self, output_path: str | Path,
                 template_path: Optional[str | Path] = None) -> Path:
         """Compile the report to PDF."""
+        typst_mod = None
         try:
-            import typst as typst_mod
+            import typst as typst_mod  # type: ignore[assignment]
         except ImportError:
-            raise ImportError(
-                "typst Python package required: pip install typst"
-            )
+            typst_mod = None
 
         output = Path(output_path).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -266,11 +266,32 @@ class ReportBuilder:
             typ_file.write_text(typ_source, encoding="utf-8")
 
             # Compile
-            typst_mod.compile(
-                str(typ_file),
-                output=str(output),
-                root=str(tmp),
-            )
+            if typst_mod is not None:
+                typst_mod.compile(
+                    str(typ_file),
+                    output=str(output),
+                    root=str(tmp),
+                )
+            else:
+                typst_bin = shutil.which("typst")
+                if not typst_bin:
+                    raise ImportError(
+                        "Typst compiler unavailable. Install either the "
+                        'Python package (`pip install typst`) or the `typst` CLI.'
+                    )
+                subprocess.run(
+                    [
+                        typst_bin,
+                        "compile",
+                        str(typ_file),
+                        str(output),
+                        "--root",
+                        str(tmp),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
 
         return output
 

@@ -126,8 +126,8 @@
 
   // Page setup
   set page(
-    paper: "us-letter",
-    margin: (top: 2.8cm, bottom: 2.5cm, left: 2.2cm, right: 2.2cm),
+    paper: "a4",
+    margin: (top: 2.45cm, bottom: 2.2cm, left: 2.0cm, right: 2.0cm),
     header: context {
       if counter(page).get().first() > 1 {
         set text(7.5pt, fill: muted)
@@ -149,10 +149,10 @@
 
   // Typography
   set text(
-    font: ("Linux Libertine", "Libertinus Serif", "Noto Serif"),
-    size: 10.5pt, fill: rgb("#333333"),
+    font: ("Liberation Sans", "Arial", "Noto Sans", "DejaVu Sans"),
+    size: 9.8pt, fill: rgb("#333333"),
   )
-  set par(justify: true, leading: 0.72em, first-line-indent: 0pt)
+  set par(justify: true, leading: 0.66em, first-line-indent: 0pt)
 
   // Heading styles — compact spacing to avoid wasted whitespace
   show heading.where(level: 1): it => {
@@ -190,25 +190,25 @@
   show link: it => text(fill: accent)[#it]
 
   // Title page
-  v(3cm)
+  v(1.65cm)
   align(left)[
-    #text(size: 26pt, weight: "bold", fill: primary)[#title]
+    #text(size: 23pt, weight: "bold", fill: primary)[#title]
     #v(4pt)
     #if subtitle != "" {
-      text(size: 13pt, fill: accent)[#subtitle]
+      text(size: 11.5pt, fill: accent)[#subtitle]
       v(4pt)
     }
   ]
   v(6pt)
-  line(length: 50%, stroke: 2pt + primary)
-  v(16pt)
+  line(length: 42%, stroke: 1.8pt + primary)
+  v(12pt)
 
-  set text(size: 10pt)
+  set text(size: 9.5pt)
   if date != "" [Date: #date \ ]
   if author != "" [Analyst: #author \ ]
   if project != "" [Project: #project]
 
-  v(20pt)
+  v(16pt)
 
   // Body content
   body

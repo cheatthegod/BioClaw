@@ -58,6 +58,11 @@ DEFAULT_TOTAL_VOLUME = 24.0 # mL
 DATA_EXTENSIONS = {'.csv', '.tsv', '.txt', '.xlsx', '.xls'}
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.gif'}
 
+REPORT_PROFILE_CHOICES = ('full', 'compact')
+RENDERER_CHOICES = ('auto', 'typst', 'fpdf2')
+DEFAULT_REPORT_PROFILE = 'compact'
+DEFAULT_RENDERER = 'auto'
+
 
 # ─── Data Classes ───────────────────────────────────────────────────────────────
 
@@ -89,6 +94,8 @@ class ConstructResult:
     notes: List[str]
     figure_path: Optional[str] = None
     original_image_path: Optional[str] = None
+    cohort: str = "primary"
+    cohort_year: Optional[int] = None
 
     # runtime-only, not serialized
     _volumes: Optional[object] = field(default=None, repr=False)
@@ -104,6 +111,8 @@ class ConstructResult:
             'has_aggregation': self.has_aggregation,
             'aggregation_pct': round(self.aggregation_pct, 1),
             'dominant_species': self.dominant_species,
+            'cohort': self.cohort,
+            'cohort_year': self.cohort_year,
             'notes': self.notes,
             'peaks': [
                 {
@@ -119,6 +128,18 @@ class ConstructResult:
             ],
         }
         return d
+
+
+@dataclass
+class ReportBuildResult:
+    """Metadata about the generated SEC report artifact."""
+    pdf_path: str
+    renderer: str
+    report_profile: str
+    requested_renderer: str
+    fallback_used: bool = False
+    fallback_reason: Optional[str] = None
+    appendix_path: Optional[str] = None
 
 
 # ─── Data Parser ────────────────────────────────────────────────────────────────
@@ -610,14 +631,15 @@ class SECPlotter:
         fig.savefig(outpath, dpi=300)
         plt.close(fig)
 
-    def plot_grid(self, results: List[ConstructResult], outpath: str):
+    def plot_grid(self, results: List[ConstructResult], outpath: str,
+                  max_cols: int = 4, title: str = "Individual SEC Chromatograms"):
         """Multi-panel grid of individual chromatograms (Biomni Figure 2 style)."""
         n = len(results)
         if n == 0:
             return
-        cols = min(4, n)
+        cols = min(max_cols, n)
         rows = (n + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(3.8 * cols, 2.8 * rows),
+        fig, axes = plt.subplots(rows, cols, figsize=(4.4 * cols, 3.1 * rows),
                                   squeeze=False)
 
         zone_colors = ['#d62728', '#ff7f0e', '#2ca02c', '#1f77b4', '#9467bd']
@@ -659,7 +681,7 @@ class SECPlotter:
             row_i, col_i = divmod(idx, cols)
             axes[row_i][col_i].set_visible(False)
 
-        fig.suptitle('Individual SEC Chromatograms', fontsize=11, fontweight='bold', y=1.0)
+        fig.suptitle(title, fontsize=11, fontweight='bold', y=1.0)
         plt.tight_layout()
         fig.savefig(outpath, dpi=250)
         plt.close(fig)
@@ -667,15 +689,15 @@ class SECPlotter:
     def plot_ranking(self, results: List[ConstructResult], outpath: str):
         """Horizontal bar chart ranking constructs by quality."""
         sr = sorted(results, key=lambda r: r.quality_score, reverse=True)
-        fig, ax = plt.subplots(figsize=(10, max(3, len(sr) * 0.55 + 1)))
+        fig, ax = plt.subplots(figsize=(9.2, max(3, len(sr) * 0.42 + 0.8)))
 
-        names = [r.name for r in sr]
+        names = [self._short_name(r.name, maxlen=28) for r in sr]
         scores = [r.quality_score for r in sr]
         colors = ['#2ca02c' if s >= 7 else '#ff7f0e' if s >= 4 else '#d62728' for s in scores]
 
         bars = ax.barh(range(len(names)), scores, color=colors, alpha=0.85, edgecolor='white')
         ax.set_yticks(range(len(names)))
-        ax.set_yticklabels(names, fontsize=9)
+        ax.set_yticklabels(names, fontsize=8)
         ax.set_xlabel('Quality Score (0–10)')
         ax.set_title('Construct Ranking by SEC Profile Quality', fontweight='bold')
         ax.set_xlim(0, 10.5)
@@ -683,7 +705,7 @@ class SECPlotter:
 
         for bar, sc in zip(bars, scores):
             ax.text(sc + 0.15, bar.get_y() + bar.get_height() / 2,
-                    f'{sc:.1f}', va='center', fontsize=9, fontweight='bold')
+                    f'{sc:.1f}', va='center', fontsize=8.5, fontweight='bold')
 
         plt.tight_layout()
         fig.savefig(outpath, dpi=300)
@@ -790,10 +812,135 @@ def match_image(construct_name: str, images: List[str]) -> Optional[str]:
     return None
 
 
+def _normalize_report_profile(report_profile: str) -> str:
+    profile = (report_profile or DEFAULT_REPORT_PROFILE).strip().lower()
+    if profile not in REPORT_PROFILE_CHOICES:
+        raise ValueError(
+            f"Unsupported report profile '{report_profile}'. "
+            f"Choose from: {', '.join(REPORT_PROFILE_CHOICES)}"
+        )
+    return profile
+
+
+def _normalize_renderer(renderer: str) -> str:
+    mode = (renderer or DEFAULT_RENDERER).strip().lower()
+    if mode not in RENDERER_CHOICES:
+        raise ValueError(
+            f"Unsupported renderer '{renderer}'. "
+            f"Choose from: {', '.join(RENDERER_CHOICES)}"
+        )
+    return mode
+
+
+def _build_sec_report(
+    results: List[ConstructResult],
+    image_files: List[str],
+    figs_dir: str,
+    output_dir: str,
+    void_volume: float,
+    report_profile: str,
+    renderer: str,
+) -> ReportBuildResult:
+    """Build the SEC PDF report and capture renderer metadata."""
+    report_profile = _normalize_report_profile(report_profile)
+    renderer = _normalize_renderer(renderer)
+
+    pdf_path = os.path.join(output_dir, 'SEC_Analysis_Report.pdf')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+
+    print(f"      Report profile   : {report_profile}")
+    print(f"      Renderer mode    : {renderer}")
+
+    if renderer == 'fpdf2':
+        from sec_report_pdf import SECReportPDF
+        report = SECReportPDF(void_volume=void_volume, report_profile=report_profile)
+        report.build(results, image_files, figs_dir, pdf_path)
+        print(f"      → {pdf_path} (fpdf2)")
+        return ReportBuildResult(
+            pdf_path=pdf_path,
+            renderer='fpdf2',
+            report_profile=report_profile,
+            requested_renderer=renderer,
+        )
+
+    try:
+        from sec_report_typst import build_typst_report
+        build_typst_report(
+            results,
+            image_files,
+            figs_dir,
+            pdf_path,
+            void_volume=void_volume,
+            report_profile=report_profile,
+        )
+        print(f"      → {pdf_path} (Typst)")
+        return ReportBuildResult(
+            pdf_path=pdf_path,
+            renderer='typst',
+            report_profile=report_profile,
+            requested_renderer=renderer,
+        )
+    except Exception as e:
+        reason = f"{type(e).__name__}: {e}"
+        print(f"      Typst renderer unavailable ({reason})")
+        if renderer == 'typst':
+            raise RuntimeError(
+                "Typst renderer was required but could not be used. "
+                f"Reason: {reason}"
+            ) from e
+
+        print("      Falling back to fpdf2 renderer …")
+        from sec_report_pdf import SECReportPDF
+        report = SECReportPDF(void_volume=void_volume, report_profile=report_profile)
+        report.build(results, image_files, figs_dir, pdf_path)
+        print(f"      → {pdf_path} (fpdf2 fallback)")
+        return ReportBuildResult(
+            pdf_path=pdf_path,
+            renderer='fpdf2',
+            report_profile=report_profile,
+            requested_renderer=renderer,
+            fallback_used=True,
+            fallback_reason=reason,
+        )
+
+
+def _build_sec_appendix(
+    results: List[ConstructResult],
+    image_files: List[str],
+    figs_dir: str,
+    output_path: str,
+    void_volume: float,
+    renderer: str,
+) -> str:
+    """Generate the appendix PDF with exhaustive per-construct detail."""
+    renderer = _normalize_renderer(renderer)
+
+    if renderer == 'fpdf2':
+        from sec_report_pdf import SECReportPDF
+        report = SECReportPDF(void_volume=void_volume, report_profile='full')
+        report.build_appendix(results, image_files, figs_dir, output_path)
+        return output_path
+
+    try:
+        from sec_report_typst import build_typst_appendix
+        build_typst_appendix(results, image_files, figs_dir, output_path,
+                             void_volume=void_volume)
+        return output_path
+    except Exception:
+        from sec_report_pdf import SECReportPDF
+        report = SECReportPDF(void_volume=void_volume, report_profile='full')
+        report.build_appendix(results, image_files, figs_dir, output_path)
+        return output_path
+
+
 # ─── Main Pipeline ──────────────────────────────────────────────────────────────
 
 def run_pipeline(input_path: str, output_dir: str,
-                 void_volume: float = DEFAULT_VOID_VOLUME) -> str:
+                 void_volume: float = DEFAULT_VOID_VOLUME,
+                 report_profile: str = DEFAULT_REPORT_PROFILE,
+                 renderer: str = DEFAULT_RENDERER) -> str:
     """
     Full SEC analysis pipeline.
 
@@ -801,6 +948,8 @@ def run_pipeline(input_path: str, output_dir: str,
         input_path: Directory with SEC files, or a .zip archive.
         output_dir: Where to write figures and PDF.
         void_volume: Column void volume in mL.
+        report_profile: Report verbosity/profile selector.
+        renderer: Renderer mode: auto, typst, or fpdf2.
 
     Returns:
         Path to generated PDF report.
@@ -905,6 +1054,16 @@ def run_pipeline(input_path: str, output_dir: str,
         print("\n  ERROR  No constructs could be analyzed.")
         sys.exit(1)
 
+    # ── 2b. Cohort assignment ───────────────────────────────────────────────
+    from sec_report_common import assign_cohorts, select_representative_constructs
+    cohort_labels = assign_cohorts(results)
+    if any("context" in v for v in cohort_labels.values()):
+        print(f"      Cohorts detected:")
+        for cname, label in cohort_labels.items():
+            print(f"        {cname:30s} → {label}")
+    else:
+        print(f"      Cohort: all primary")
+
     # ── 3. Comparison figures ────────────────────────────────────────────────
     print(f"\n[3/5] Generating comparison figures …")
     if len(results) > 1:
@@ -913,33 +1072,76 @@ def run_pipeline(input_path: str, output_dir: str,
         plotter.plot_grid(results, os.path.join(figs_dir, 'individual_grid.png'))
     plotter.plot_ranking(results, os.path.join(figs_dir, 'ranking_summary.png'))
 
+    primary_results = [r for r in results if getattr(r, 'cohort', 'primary') == 'primary']
+    if report_profile == 'compact':
+        figure_pool = primary_results or results
+        if len(figure_pool) > 1:
+            plotter.plot_comparison(
+                figure_pool,
+                os.path.join(figs_dir, 'comparison_overlay_primary.png'),
+            )
+            plotter.plot_zone_fractions(
+                figure_pool,
+                os.path.join(figs_dir, 'zone_fractions_primary.png'),
+            )
+            plotter.plot_ranking(
+                figure_pool,
+                os.path.join(figs_dir, 'ranking_summary_primary.png'),
+            )
+        selected = select_representative_constructs(figure_pool, max_items=4)
+        if selected:
+            plotter.plot_grid(
+                selected,
+                os.path.join(figs_dir, 'selected_grid.png'),
+                max_cols=2,
+                title='Representative SEC Chromatograms',
+            )
+
     # ── 4. PDF report ────────────────────────────────────────────────────────
     print(f"\n[4/5] Building PDF report …")
 
-    pdf_path = os.path.join(output_dir, 'SEC_Analysis_Report.pdf')
+    report_build = _build_sec_report(
+        results,
+        image_files,
+        figs_dir,
+        output_dir,
+        void_volume=void_volume,
+        report_profile=report_profile,
+        renderer=renderer,
+    )
+    pdf_path = report_build.pdf_path
 
-    # Try Typst report first (publication quality), fall back to fpdf2
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, script_dir)
-    try:
-        from sec_report_typst import build_typst_report
-        build_typst_report(results, image_files, figs_dir, pdf_path,
-                           void_volume=void_volume)
-        print(f"      → {pdf_path} (Typst)")
-    except Exception as e:
-        print(f"      Typst unavailable ({e}), falling back to fpdf2 …")
-        from sec_report_pdf import SECReportPDF
-        report = SECReportPDF(void_volume=void_volume)
-        report.build(results, image_files, figs_dir, pdf_path)
-        print(f"      → {pdf_path} (fpdf2)")
+    # ── 4b. Appendix (compact mode) ────────────────────────────────────────
+    if report_profile == 'compact':
+        appendix_path = os.path.join(output_dir, 'SEC_Analysis_Appendix.pdf')
+        try:
+            _build_sec_appendix(
+                results, image_files, figs_dir, appendix_path,
+                void_volume=void_volume, renderer=renderer,
+            )
+            report_build.appendix_path = appendix_path
+            print(f"      → Appendix: {appendix_path}")
+        except Exception as e:
+            print(f"      Appendix generation failed: {e}")
 
     # ── 5. JSON summary ─────────────────────────────────────────────────────
     print(f"\n[5/5] Writing summary …")
+    sr_final = sorted(results, key=lambda x: x.quality_score, reverse=True)
+    selected_pool = primary_results if report_profile == 'compact' and primary_results else sr_final
+    selected_names = [r.name for r in select_representative_constructs(selected_pool, max_items=4)]
+
     summary = {
         'generated': datetime.now().isoformat(),
         'n_constructs': len(results),
         'void_volume_mL': void_volume,
-        'constructs': [r.to_dict() for r in sorted(results, key=lambda x: x.quality_score, reverse=True)],
+        'report_profile': report_build.report_profile,
+        'renderer': report_build.renderer,
+        'requested_renderer': report_build.requested_renderer,
+        'fallback_used': report_build.fallback_used,
+        'fallback_reason': report_build.fallback_reason,
+        'appendix_path': report_build.appendix_path,
+        'selected_constructs': selected_names,
+        'constructs': [r.to_dict() for r in sr_final],
     }
     json_path = os.path.join(output_dir, 'analysis_summary.json')
     with open(json_path, 'w') as f:
@@ -964,7 +1166,13 @@ def run_pipeline(input_path: str, output_dir: str,
         print(f"    → {sr[0].name} (Q={sr[0].quality_score:.1f})  [best available]")
 
     print(f"\n  PDF report : {pdf_path}")
+    if report_build.appendix_path:
+        print(f"  Appendix   : {report_build.appendix_path}")
     print(f"  JSON data  : {json_path}")
+    print(f"  Renderer   : {report_build.renderer} (requested={report_build.requested_renderer})")
+    print(f"  Profile    : {report_build.report_profile}")
+    if report_build.fallback_used and report_build.fallback_reason:
+        print(f"  Fallback   : yes ({report_build.fallback_reason})")
     print("=" * 64)
 
     return pdf_path
@@ -981,6 +1189,7 @@ Examples:
   python sec_pipeline.py -i ./sec_data/ -o ./sec_report/
   python sec_pipeline.py -i experiment.zip -o ./sec_report/
   python sec_pipeline.py -i ./data/ -o ./out/ --void-volume 7.5
+  python sec_pipeline.py -i ./data/ -o ./out/ --renderer typst --report-profile compact
         """)
     ap.add_argument('-i', '--input', required=True,
                     help='Input directory or ZIP with SEC data files and images')
@@ -988,8 +1197,33 @@ Examples:
                     help='Output directory for figures and PDF report')
     ap.add_argument('--void-volume', type=float, default=DEFAULT_VOID_VOLUME,
                     help=f'Column void volume in mL (default: {DEFAULT_VOID_VOLUME})')
+    ap.add_argument(
+        '--report-profile',
+        choices=REPORT_PROFILE_CHOICES,
+        default=DEFAULT_REPORT_PROFILE,
+        help=(
+            'Report output profile. "compact" is the default user-facing concise report; '
+            '"full" preserves the exhaustive legacy-style output.'
+        ),
+    )
+    ap.add_argument(
+        '--renderer',
+        choices=RENDERER_CHOICES,
+        default=DEFAULT_RENDERER,
+        help=(
+            'Renderer mode: "auto" tries Typst first and falls back to fpdf2; '
+            '"typst" requires Typst and fails if unavailable; '
+            '"fpdf2" skips Typst and uses the fallback renderer directly.'
+        ),
+    )
     args = ap.parse_args()
-    run_pipeline(args.input, args.output, args.void_volume)
+    run_pipeline(
+        args.input,
+        args.output,
+        args.void_volume,
+        report_profile=args.report_profile,
+        renderer=args.renderer,
+    )
 
 
 if __name__ == '__main__':

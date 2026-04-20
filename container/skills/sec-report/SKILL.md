@@ -69,6 +69,12 @@ python3 sec_pipeline.py \
 
 The script accepts either a ZIP file or a directory as `--input`. It handles extraction, parsing, peak detection, figure generation, and PDF report building automatically. The pipeline will use the Typst template engine for publication-quality output; if Typst is unavailable, it falls back to fpdf2.
 
+By default, the pipeline now produces a **compact user-facing report**. If you ever need the older exhaustive style for debugging or appendix generation, pass:
+
+```bash
+  --report-profile full
+```
+
 **Step 4 — Send the PDF report to the user** via `send_image` MCP tool:
 ```
 file_path: /workspace/group/sec_analysis/output/SEC_Analysis_Report.pdf
